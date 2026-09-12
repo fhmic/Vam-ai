@@ -1,0 +1,68 @@
+# Automated Supabase Migration Deployment — CTO Review Foundation
+# Hardening Change #5.
+#
+# Runs after CI is green on main (via workflow_run, so it never deploy
+# a commit that failed lint/typecheck/test/build) and pushes any pending
+# migrations in supabase/migrations/*.sql to the linked Supabase projects,
+# closing the gap called out in the CTO review: migrations previously
+# had to be applied manually (`supabase db push --linked` run by a human,
+# whenever someone remembered), which is exactly how GitHub, Vercel, and
+# Supabase schema state drift apart. The app deploy on Vercel is
+# triggered separately by Vercel's own GitHub integration (Section 13.4
+# of the blueprint) — this workflow's only job is the database side, and
+# is intentionally sequenced so the schema is migrated at/near the same
+# time as the app deploy, per Section 13.4's "app never runs against an
+# un-migrated schema" requirement.
+#
+# AUDIT NOTE (Phase 1A Final Production Readiness Audit, Phase 5): CI's
+# `workflow_run` conclusion reflects every job in ci.yml, including the
+# `verify-migrations` job added in this audit — so a migration that
+# fails to apply cleanly from scratch now blocks this deploy too, not
+# just lint/typecheck/test/build.
+name: Deploy Supabase Migrations
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy-migrations:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+      - name: Verify migrations (dry run diff against linked project)
+        # Fails the job — before anything is applied — if the local
+        # migration history doesn't cleanly line up with what's already
+        # on the remote project, e.g. a migration was edited after being
+        # applied, or the remote has diverged out-of-band. This is the
+        # "verify migrations" gate the CTO review asked for: never push
+        # blind.
+        run: supabase db push --linked --dry-run
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Deploy migrations
+        run: supabase db push --linked
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

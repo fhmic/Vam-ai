@@ -1,0 +1,106 @@
+# CI Gate — CTO Review Foundation Hardening Change #5.
+#
+# Required to pass before merge (see README "Deployment (Vercel)" and
+# Phase 1 blueprint Section 10.3). Runs on every PR and on push to main
+# so main itself is always green.
+#
+# AUDIT NOTE (Phase 1A Final Production Readiness Audit): this file and
+# deploy.yml were previously committed under `.github/workflow/` (singular).
+# GitHub Actions only discovers workflows under `.github/workflows/`
+# (plural), so neither workflow had ever actually run on GitHub — every
+# "CI passes" claim up to this point was based on local runs only. Moved
+# to the correct path as part of this audit; see
+# docs/VAM.md §21, for the full finding.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'example-anon-key' }}
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint for leaked server-only secrets in client bundle
+        # Change #5 / blueprint Section 14.1: fail the build if
+        # GROQ_API_KEY or SUPABASE_SERVICE_ROLE_KEY are referenced
+        # outside server-only files (route handlers, admin.ts, etc).
+        # Grep-based guard: anything importing these outside files that
+        # already import "server-only" (or live under src/app/api) is
+        # flagged. Cheap, no new tooling dependency, catches the common
+        # accidental-leak case; not a substitute for a real bundle
+        # analyzer if the surface area grows.
+        run: |
+          MATCHES=$(grep -rl --include='*.ts' --include='*.tsx' \
+            -E 'GROQ_API_KEY|SUPABASE_SERVICE_ROLE_KEY' src \
+            | xargs -r grep -L '"server-only"' \
+            | grep -v '/api/' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "Server-only secret referenced outside a server-only-guarded file:"
+            echo "$MATCHES"
+            exit 1
+          fi
+
+  # AUDIT ADDITION (Phase 1A Final Production Readiness Audit, Phase 5 —
+  # Deployment Pipeline Audit): before this job existed, migration
+  # correctness was validated ONLY by deploy.yml's dry-run, which runs
+  # AFTER merge to main against the real linked project. A migration
+  # with a syntax error, a bad forward reference, or an assumption that
+  # didn't hold from a clean history would only be caught post-merge —
+  # exactly the "verify migrations" gate the CTO review asked for, but
+  # applied too late to block a bad PR. This job boots the real local
+  # Supabase stack (Postgres + Auth, matching production — migrations
+  # 0003/0004 reference auth.users, which only exists in the real stack,
+  # not a bare Postgres container) and applies every migration in
+  # supabase/migrations/ from scratch, on every PR, before merge.
+  verify-migrations:
+    name: Verify migrations apply cleanly
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start local Supabase stack (applies every migration from scratch)
+        run: supabase start
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop

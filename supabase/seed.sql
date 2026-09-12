@@ -1,0 +1,14 @@
+-- seed.sql
+-- Local development seed data.
+--
+-- Mentors/assessment templates are still empty in Phase 1A — those are
+-- populated starting in Phase 1B when those tables are introduced.
+--
+-- Legal documents are NOT seeded here. The onboarding legal-acceptance
+-- flow needs at least one published version of each required document to
+-- exist in EVERY environment (local, preview, staging, prod), not just
+-- local dev, so that insert lives in migration
+-- 0007_legal_acceptance_system.sql instead — `supabase db push` (Change
+-- #5's CI deploy step) publishes it everywhere a migration runs.
+-- `supabase start` / `supabase db reset` apply migrations before this
+-- file, so the rows already exist by the time this seed runs.
