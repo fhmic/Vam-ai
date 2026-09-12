@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { verifyAuthenticatedUser } from "@/lib/supabase/auth-guard";
 import { rematchMentor } from "@/lib/mentor/assignment";
+import { checkRateLimit, rateLimitResponse, REMATCH_RATE_LIMIT } from "@/lib/api/rate-limit";
+import { reportApiError } from "@/lib/observability/error-reporting";
 
 /**
  * Stage 2.2 — Mentor Matching Engine.
@@ -25,9 +27,14 @@ import { rematchMentor } from "@/lib/mentor/assignment";
 export async function POST() {
   const auth = await verifyAuthenticatedUser();
   if (!auth.ok) return auth.response;
+  const { user } = auth.data;
+
+  // Stage 6.1 — 3/day from ROADMAP.md.
+  const rateLimit = checkRateLimit(`rematch:${user.id}`, REMATCH_RATE_LIMIT);
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   try {
-    const result = await rematchMentor(auth.data.user.id);
+    const result = await rematchMentor(user.id);
     return NextResponse.json({
       changed: result.changed,
       mentor: {
@@ -37,6 +44,7 @@ export async function POST() {
       },
     });
   } catch (err) {
+    reportApiError(err, { route: "mentor/rematch", userId: user.id });
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: { code: "UPSTREAM_ERROR", message } }, { status: 502 });
   }

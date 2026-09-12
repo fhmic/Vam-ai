@@ -5,6 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getOrAssignMentor } from "@/lib/mentor/assignment";
 import { resolveVoiceId } from "@/lib/voice/provider";
 import { synthesizeSpeech } from "@/lib/groq/client";
+import { checkRateLimit, rateLimitResponse, VOICE_RATE_LIMIT } from "@/lib/api/rate-limit";
+import { reportApiError } from "@/lib/observability/error-reporting";
 
 const bodySchema = z.object({
   text: z.string().trim().min(1).max(4000),
@@ -25,6 +27,11 @@ export async function POST(request: Request) {
   const auth = await verifyAuthenticatedUser();
   if (!auth.ok) return auth.response;
   const { user } = auth.data;
+
+  // Stage 6.1 — shared with /api/voice/stt: same 100/hour "voice
+  // conversions" budget from ROADMAP.md.
+  const rateLimit = checkRateLimit(`voice:${user.id}`, VOICE_RATE_LIMIT);
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   const ttsModel = process.env.GROQ_MODEL_TTS;
   if (!ttsModel) {
@@ -63,6 +70,7 @@ export async function POST(request: Request) {
 
     return new Response(audio, { headers: { "Content-Type": "audio/mpeg" } });
   } catch (err) {
+    reportApiError(err, { route: "voice/tts", userId: user.id });
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: { code: "UPSTREAM_ERROR", message } }, { status: 502 });
   }

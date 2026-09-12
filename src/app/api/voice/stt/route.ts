@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { verifyAuthenticatedUser } from "@/lib/supabase/auth-guard";
 import { transcribeAudio } from "@/lib/groq/client";
+import { checkRateLimit, rateLimitResponse, VOICE_RATE_LIMIT } from "@/lib/api/rate-limit";
+import { reportApiError } from "@/lib/observability/error-reporting";
 
 /**
  * Stage 2.5 — Voice Layer (speech-to-text).
@@ -13,6 +15,12 @@ import { transcribeAudio } from "@/lib/groq/client";
 export async function POST(request: Request) {
   const auth = await verifyAuthenticatedUser();
   if (!auth.ok) return auth.response;
+  const { user } = auth.data;
+
+  // Stage 6.1 — shared with /api/voice/tts: both are "voice
+  // conversions" against the same 100/hour budget from ROADMAP.md.
+  const rateLimit = checkRateLimit(`voice:${user.id}`, VOICE_RATE_LIMIT);
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   const sttModel = process.env.GROQ_MODEL_STT;
   if (!sttModel) {
@@ -47,6 +55,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ transcript: result.text });
   } catch (err) {
+    reportApiError(err, { route: "voice/stt", userId: user.id });
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: { code: "UPSTREAM_ERROR", message } }, { status: 502 });
   }

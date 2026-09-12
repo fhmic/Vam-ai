@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { hasValidCronSecret } from "@/lib/api/cron-auth";
 import { getOrCreateRequestId, requestIdHeaders } from "@/lib/api/request-id";
 import { consolidateMemoriesIfNeeded, CONSOLIDATION_THRESHOLD } from "@/lib/memory/consolidation";
+import { reportApiError } from "@/lib/observability/error-reporting";
 
 /**
  * Hard cap on users processed per cron invocation. Sized so the run
@@ -98,6 +99,7 @@ export async function GET(request: Request) {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
+      reportApiError(err, { route: "internal/memory-consolidate", requestId, userId });
       failures.push({ userId, message });
     }
   }

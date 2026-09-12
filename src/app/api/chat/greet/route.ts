@@ -6,6 +6,7 @@ import { loadSystemPrompt, loadProgressSummary } from "@/lib/chat/prompt-context
 import { persistMentorReply } from "@/lib/chat/persist-reply";
 import { buildOpeningTurnDirective } from "@/lib/groq/prompts";
 import { streamChatCompletion } from "@/lib/groq/client";
+import { reportApiError } from "@/lib/observability/error-reporting";
 
 /**
  * Product Redefinition — Mentor Redefinition, proactive opening.
@@ -111,6 +112,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
+    reportApiError(err, { route: "chat/greet", userId: user.id });
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: { code: "UPSTREAM_ERROR", message } }, { status: 502 });
   }

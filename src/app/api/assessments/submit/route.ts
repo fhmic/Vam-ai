@@ -3,6 +3,8 @@ import { z } from "zod";
 import { verifyAuthenticatedUser } from "@/lib/supabase/auth-guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { submitAssessment } from "@/lib/assessments/scoring";
+import { checkRateLimit, rateLimitResponse, ASSESSMENT_RATE_LIMIT } from "@/lib/api/rate-limit";
+import { reportApiError } from "@/lib/observability/error-reporting";
 
 const bodySchema = z.object({
   templateId: z.string().uuid(),
@@ -12,6 +14,11 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   const auth = await verifyAuthenticatedUser();
   if (!auth.ok) return auth.response;
+  const { user } = auth.data;
+
+  // Stage 6.1 — 5/day from ROADMAP.md.
+  const rateLimit = checkRateLimit(`assessment:${user.id}`, ASSESSMENT_RATE_LIMIT);
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   const utilityModel = process.env.GROQ_MODEL_UTILITY;
   if (!utilityModel) {
@@ -46,7 +53,7 @@ export async function POST(request: Request) {
     }
 
     const result = await submitAssessment({
-      userId: auth.data.user.id,
+      userId: user.id,
       templateId: parsed.data.templateId,
       template,
       answers: parsed.data.answers,
@@ -55,6 +62,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (err) {
+    reportApiError(err, { route: "assessments/submit", userId: user.id });
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: { code: "UPSTREAM_ERROR", message } }, { status: 502 });
   }

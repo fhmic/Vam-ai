@@ -6,6 +6,8 @@ import { getOrAssignMentor } from "@/lib/mentor/assignment";
 import { loadSystemPrompt } from "@/lib/chat/prompt-context";
 import { persistMentorReply } from "@/lib/chat/persist-reply";
 import { streamChatCompletion, type GroqMessage } from "@/lib/groq/client";
+import { checkRateLimit, rateLimitResponse, CHAT_RATE_LIMIT } from "@/lib/api/rate-limit";
+import { reportApiError } from "@/lib/observability/error-reporting";
 
 const bodySchema = z.object({
   sessionId: z.string().uuid().nullable(),
@@ -37,6 +39,10 @@ export async function POST(request: Request) {
   const auth = await verifyAuthenticatedUser();
   if (!auth.ok) return auth.response;
   const { user } = auth.data;
+
+  // Stage 6.1 — 60 messages/hour from ROADMAP.md.
+  const rateLimit = checkRateLimit(`chat:${user.id}`, CHAT_RATE_LIMIT);
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -145,6 +151,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
+    reportApiError(err, { route: "chat", userId: user.id });
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: { code: "UPSTREAM_ERROR", message } }, { status: 502 });
   }
