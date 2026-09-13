@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getRelevantMemories } from "@/lib/memory/retrieval";
 import { pickRelevantFramework } from "@/lib/coaching/frameworks";
 import { getCurrentProgramDay } from "@/lib/journeys/current-program-day";
-import { buildSystemPrompt, type ProgressSummary } from "@/lib/groq/prompts";
+import { buildSystemPrompt, type ProgressSummary } from "@/lib/ai/prompts";
 import type { Database, Mentor } from "@/types/database";
 
 /**

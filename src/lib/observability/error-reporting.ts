@@ -11,7 +11,7 @@ import * as Sentry from "@sentry/nextjs";
  * instead of a raw 500 — which means the error is *handled*, and
  * would otherwise never reach Sentry at all. `reportApiError` is the
  * explicit capture call each of those catch blocks makes, so a real
- * upstream failure (Groq down, a Supabase write failing) still shows
+ * upstream failure (the AI provider down, a Supabase write failing) still shows
  * up in Sentry with the request's `requestId` attached, instead of
  * only ever being visible in whichever client happened to be looking
  * at devtools when it failed.

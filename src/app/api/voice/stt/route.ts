@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyAuthenticatedUser } from "@/lib/supabase/auth-guard";
-import { transcribeAudio } from "@/lib/groq/client";
+import { transcribeAudio } from "@/lib/ai/client";
 import { checkRateLimit, rateLimitResponse, VOICE_RATE_LIMIT } from "@/lib/api/rate-limit";
 import { reportApiError } from "@/lib/observability/error-reporting";
 
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   const rateLimit = checkRateLimit(`voice:${user.id}`, VOICE_RATE_LIMIT);
   if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
-  const sttModel = process.env.GROQ_MODEL_STT;
+  const sttModel = process.env.GEMINI_MODEL_STT;
   if (!sttModel) {
     return NextResponse.json(
       { error: { code: "UPSTREAM_ERROR", message: "Speech-to-text model configuration is missing" } },

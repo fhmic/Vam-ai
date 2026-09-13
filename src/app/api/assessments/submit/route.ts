@@ -20,10 +20,10 @@ export async function POST(request: Request) {
   const rateLimit = checkRateLimit(`assessment:${user.id}`, ASSESSMENT_RATE_LIMIT);
   if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
-  const utilityModel = process.env.GROQ_MODEL_UTILITY;
+  const utilityModel = process.env.GEMINI_MODEL_UTILITY;
   if (!utilityModel) {
     return NextResponse.json(
-      { error: { code: "UPSTREAM_ERROR", message: "Groq model configuration is missing" } },
+      { error: { code: "UPSTREAM_ERROR", message: "AI model configuration is missing" } },
       { status: 502 },
     );
   }

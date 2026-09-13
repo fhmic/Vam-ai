@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getOrAssignMentor } from "@/lib/mentor/assignment";
 import { loadSystemPrompt } from "@/lib/chat/prompt-context";
 import { persistMentorReply } from "@/lib/chat/persist-reply";
-import { streamChatCompletion, type GroqMessage } from "@/lib/groq/client";
+import { streamChatCompletion, type AiMessage } from "@/lib/ai/client";
 import { checkRateLimit, rateLimitResponse, CHAT_RATE_LIMIT } from "@/lib/api/rate-limit";
 import { reportApiError } from "@/lib/observability/error-reporting";
 
@@ -18,15 +18,17 @@ const bodySchema = z.object({
 const SHORT_TERM_CONTEXT_MESSAGES = 20;
 
 /**
- * Stage 2.3 — Groq Integration / Stage 2.1 — Mentor Domain Model.
+ * Stage 2.3 — AI Provider Integration (originally Groq, migrated to
+ * Gemini — see src/lib/ai/client.ts) / Stage 2.1 — Mentor
+ * Domain Model.
  *
  * POST { sessionId: string | null, message: string, inputMode }
  * -> text/event-stream of the mentor's reply, terminated by the raw
- *    Groq SSE stream ending (this proxies Groq's stream directly rather
- *    than re-framing it — the client is expected to parse Groq's
- *    `data: {...}` SSE lines the same way it would talking to Groq
- *    directly, since this route is a transparent proxy plus persistence,
- *    not a protocol translator).
+ *    upstream SSE stream ending (this proxies the provider's stream
+ *    directly rather than re-framing it — the client is expected to
+ *    parse the OpenAI-compatible `data: {...}` SSE lines the same way
+ *    it would talking to the provider directly, since this route is a
+ *    transparent proxy plus persistence, not a protocol translator).
  *
  * A null sessionId creates a new conversation_session, assigning a
  * mentor via getOrAssignMentor() if the user doesn't have one yet.
@@ -53,11 +55,11 @@ export async function POST(request: Request) {
   }
   const { sessionId, message, inputMode } = parsed.data;
 
-  const chatModel = process.env.GROQ_MODEL_CHAT;
-  const utilityModel = process.env.GROQ_MODEL_UTILITY;
+  const chatModel = process.env.GEMINI_MODEL_CHAT;
+  const utilityModel = process.env.GEMINI_MODEL_UTILITY;
   if (!chatModel || !utilityModel) {
     return NextResponse.json(
-      { error: { code: "UPSTREAM_ERROR", message: "Groq model configuration is missing" } },
+      { error: { code: "UPSTREAM_ERROR", message: "AI model configuration is missing" } },
       { status: 502 },
     );
   }
@@ -101,7 +103,7 @@ export async function POST(request: Request) {
       throw new Error(`failed to persist user message: ${userMessageError.message}`);
     }
 
-    const shortTermContext: GroqMessage[] = (history ?? [])
+    const shortTermContext: AiMessage[] = (history ?? [])
       .slice()
       .reverse()
       .map((m) => ({
@@ -109,7 +111,7 @@ export async function POST(request: Request) {
         content: m.content,
       }));
 
-    const groqResponse = await streamChatCompletion({
+    const aiResponse = await streamChatCompletion({
       model: chatModel,
       messages: [
         { role: "system", content: systemPrompt },
@@ -118,7 +120,7 @@ export async function POST(request: Request) {
       ],
       // Stage 6 barge-in: if the client aborts this fetch (user started
       // talking over the mentor), that cancellation propagates here and
-      // actually stops the upstream Groq generation, rather than just
+      // actually stops the upstream generation, rather than just
       // the client ignoring a reply that's still being generated and
       // billed for server-side.
       signal: request.signal,
@@ -127,7 +129,7 @@ export async function POST(request: Request) {
     // Tee the upstream stream: one branch goes to the client immediately,
     // the other is buffered server-side so the full reply can be
     // persisted once streaming completes.
-    const [clientStream, persistStream] = groqResponse.body!.tee();
+    const [clientStream, persistStream] = aiResponse.body!.tee();
 
     void persistMentorReply({
       admin,

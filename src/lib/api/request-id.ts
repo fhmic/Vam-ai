@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
  * the middleware) and reused for:
  *   - the response header (clients can quote it in bug reports)
  *   - any error logs emitted while handling the request
- *   - any nested upstream calls (forwarded as `X-Request-Id` to Groq
+ *   - any nested upstream calls (forwarded as `X-Request-Id` to the AI provider
  *     fetch / Supabase RPC / etc., so the same id shows up in their logs)
  *
  * The format is a v4 UUID: cheap to generate, globally unique, and

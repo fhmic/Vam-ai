@@ -44,7 +44,7 @@ export interface AssessmentDimensionTrend {
  * over time) by dimension key, in chronological order, and computes the
  * change from the first to the most recent value — the simplest
  * possible "are you improving" signal without inventing a scoring
- * model beyond what Groq already returned per submission.
+ * model beyond what the AI provider already returned per submission.
  */
 export function buildAssessmentTrends(
   scoresOverTime: Record<string, number>[],

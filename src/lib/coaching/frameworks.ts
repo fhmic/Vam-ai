@@ -6,7 +6,7 @@ import type { CoachingFramework, Profile } from "@/types/database";
  * Pure and unit-testable (tests/unit/coaching-frameworks.test.ts).
  * Returns the first active framework whose applicable_goals includes
  * the user's primary_goal, or null if none matches — buildSystemPrompt
- * (src/lib/groq/prompts.ts) only injects a framework fragment when one
+ * (src/lib/ai/prompts.ts) only injects a framework fragment when one
  * is found, so "no matching framework" is a normal, expected outcome,
  * not an error.
  */

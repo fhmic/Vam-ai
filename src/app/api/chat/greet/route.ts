@@ -4,8 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getOrAssignMentor } from "@/lib/mentor/assignment";
 import { loadSystemPrompt, loadProgressSummary } from "@/lib/chat/prompt-context";
 import { persistMentorReply } from "@/lib/chat/persist-reply";
-import { buildOpeningTurnDirective } from "@/lib/groq/prompts";
-import { streamChatCompletion } from "@/lib/groq/client";
+import { buildOpeningTurnDirective } from "@/lib/ai/prompts";
+import { streamChatCompletion } from "@/lib/ai/client";
 import { reportApiError } from "@/lib/observability/error-reporting";
 
 /**
@@ -30,7 +30,7 @@ import { reportApiError } from "@/lib/observability/error-reporting";
  *
  * Unlike /api/chat, there is no real user message here — the "kick
  * off" directive (buildOpeningTurnDirective) is synthetic, sent as the
- * user-role turn to Groq but never persisted as a messages row and
+ * user-role turn to the mentor model but never persisted as a messages row and
  * never shown in the UI. Only the mentor's resulting reply is
  * persisted. recordActivity is explicitly false when persisting it —
  * the user hasn't done anything yet, the mentor spoke first, so this
@@ -44,11 +44,11 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const sessionId: string | null = typeof body?.sessionId === "string" ? body.sessionId : null;
 
-  const chatModel = process.env.GROQ_MODEL_CHAT;
-  const utilityModel = process.env.GROQ_MODEL_UTILITY;
+  const chatModel = process.env.GEMINI_MODEL_CHAT;
+  const utilityModel = process.env.GEMINI_MODEL_UTILITY;
   if (!chatModel || !utilityModel) {
     return NextResponse.json(
-      { error: { code: "UPSTREAM_ERROR", message: "Groq model configuration is missing" } },
+      { error: { code: "UPSTREAM_ERROR", message: "AI model configuration is missing" } },
       { status: 502 },
     );
   }
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
 
     const openingDirective = buildOpeningTurnDirective(progress);
 
-    const groqResponse = await streamChatCompletion({
+    const aiResponse = await streamChatCompletion({
       model: chatModel,
       messages: [
         { role: "system", content: systemPrompt },
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
       signal: request.signal,
     });
 
-    const [clientStream, persistStream] = groqResponse.body!.tee();
+    const [clientStream, persistStream] = aiResponse.body!.tee();
 
     void persistMentorReply({
       admin,

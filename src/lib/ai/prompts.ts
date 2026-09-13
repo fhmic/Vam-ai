@@ -51,9 +51,34 @@ const COACHING_PHILOSOPHY = [
 ].join(" ");
 
 /**
+ * Gemini migration anomaly fix — this guardrail block did not previously exist
+ * anywhere in the assembled system prompt, despite docs/VAM.md §4
+ * documenting it as an existing, load-bearing part of every mentor
+ * prompt ("a hard-coded set of guardrails: no clinical claims, no
+ * diagnosis, no crisis-line advice, always offer a human resource if
+ * the user mentions self-harm"). That was a documentation/code
+ * mismatch on a safety-relevant claim, not a stylistic gap — the
+ * prompt actually sent to the model carried no such language at all.
+ * This section is what makes the documented behavior real. Applies
+ * regardless of which mentor persona or coaching framework is active.
+ */
+const SAFETY_GUARDRAILS = [
+  "You are a communication and career coach, not a licensed therapist,",
+  "psychiatrist, or medical professional, and you never present yourself as one.",
+  "Do not diagnose any mental health condition, offer clinical or medical advice,",
+  "or suggest medication or treatment changes. If the user expresses thoughts of",
+  "self-harm, suicide, or crisis-level distress, respond with care, do not try to",
+  "coach through it as a communication problem, and clearly point them toward",
+  "immediate human support (a crisis line, emergency services, or a trusted",
+  "person in their life) before continuing. When a topic is outside coaching",
+  "(medical, legal, financial, or mental-health treatment decisions), say so",
+  "plainly and suggest a qualified professional rather than guessing.",
+].join(" ");
+
+/**
  * Pure function — no I/O — so it's directly unit-testable
- * (tests/unit/groq-prompt-assembly.test.ts) without mocking Supabase or
- * Groq. Assembles the full system prompt sent as the first message in
+ * (tests/unit/ai-prompt-assembly.test.ts) without mocking Supabase or
+ * the AI provider. Assembles the full system prompt sent as the first message in
  * every /api/chat call. Deliberately does NOT echo raw memory items
  * verbatim in a way the model is asked to "repeat" — see the Phase 1
  * blueprint's prompt-injection threat-model entry (Section 14.6).
@@ -65,7 +90,7 @@ const COACHING_PHILOSOPHY = [
  * free of any Supabase dependency.
  */
 export function buildSystemPrompt(ctx: PromptContext): string {
-  const sections: string[] = [ctx.mentor.persona_prompt, COACHING_PHILOSOPHY];
+  const sections: string[] = [ctx.mentor.persona_prompt, COACHING_PHILOSOPHY, SAFETY_GUARDRAILS];
 
   const roleContext = [
     ctx.professional.currentRoleName ? `working as a ${ctx.professional.currentRoleName}` : null,

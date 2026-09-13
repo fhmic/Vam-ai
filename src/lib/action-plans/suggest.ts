@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { completeJson } from "@/lib/groq/client";
+import { completeJson } from "@/lib/ai/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const suggestionResultSchema = z.object({
@@ -16,7 +16,7 @@ ONLY with JSON: {"items": ["...", "..."]}`;
  * Stage 3.2 — Weekly action plans.
  *
  * Finds or creates this week's action_plan (Monday-anchored, UTC) and
- * populates it with Groq-suggested items (is_ai_suggested = true) if it
+ * populates it with AI-suggested items (is_ai_suggested = true) if it
  * doesn't have any yet. Never overwrites a plan that already has items —
  * calling this twice in the same week is a safe no-op after the first
  * successful generation.

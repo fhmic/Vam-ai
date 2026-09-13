@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOpeningTurnDirective, buildSystemPrompt, type ProfessionalContext } from "@/lib/groq/prompts";
+import { buildOpeningTurnDirective, buildSystemPrompt, type ProfessionalContext } from "@/lib/ai/prompts";
 import type { Mentor } from "@/types/database";
 
 const mentor: Mentor = {
@@ -133,6 +133,19 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Executive Communication Coach");
     expect(prompt).toContain("What can I help you with today?");
     expect(prompt).toContain("Think First. Speak Second.");
+  });
+
+  it("always includes the safety guardrail section, regardless of mentor persona", () => {
+    const prompt = buildSystemPrompt({
+      mentor,
+      profile: { display_name: "Sam", primary_goal: null, career_level: null },
+      professional: emptyProfessional,
+      preferences: { coaching_intensity: "medium", mentor_style: "supportive" },
+      memories: [],
+      goals: [],
+    });
+    expect(prompt).toContain("not a licensed therapist");
+    expect(prompt).toContain("self-harm");
   });
 });
 

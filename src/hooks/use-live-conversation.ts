@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useVoiceActivityDetection } from "@/hooks/use-voice-activity-detection";
+import { MIC_CONSTRAINTS } from "@/lib/voice/vad";
 
 export type LiveConversationState = "idle" | "listening" | "user-speaking" | "processing";
 
@@ -59,7 +60,7 @@ export function useLiveConversation(params: {
   const start = useCallback(async () => {
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
       streamRef.current = stream;
       setState("listening");
 

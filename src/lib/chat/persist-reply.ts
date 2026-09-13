@@ -6,7 +6,7 @@ import { recordActivitySnapshot } from "@/lib/progress/activity";
 const MEMORY_EXTRACTION_TRIGGER_EVERY_N_MESSAGES = 6;
 
 /**
- * Buffers the Groq SSE stream to reconstruct the full assistant reply,
+ * Buffers the AI provider's SSE stream to reconstruct the full assistant reply,
  * persists it, then (every N messages) triggers memory extraction.
  * Runs after the response has already been returned to the client —
  * failures here are logged, never surfaced to the user, per
@@ -26,7 +26,7 @@ export async function persistMentorReply(params: {
   recordActivity?: boolean;
 }) {
   try {
-    const text = await readGroqSseText(params.stream);
+    const text = await readAiSseText(params.stream);
     if (!text) return;
 
     await params.admin.from("messages").insert({
@@ -70,8 +70,8 @@ export async function persistMentorReply(params: {
   }
 }
 
-/** Parses Groq's `data: {...}` SSE chunks and concatenates the delta text. */
-export async function readGroqSseText(stream: ReadableStream<Uint8Array>): Promise<string> {
+/** Parses the AI provider's `data: {...}` SSE chunks (OpenAI-compatible shape) and concatenates the delta text. */
+export async function readAiSseText(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

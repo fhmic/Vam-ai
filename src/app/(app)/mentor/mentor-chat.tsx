@@ -30,7 +30,7 @@ interface ChatMessage {
  *    utterances, and the user can interrupt the mentor mid-reply —
  *    see docs/STAGE-6-VOICE-NOTES.md for the honest architecture
  *    writeup (this is not literally continuous bidirectional audio
- *    streaming — Groq's STT/TTS are REST endpoints, not a realtime
+ *    streaming — Gemini's STT/TTS are REST-shaped calls, not a realtime
  *    socket API — it's client-side VAD + barge-in + sentence-streamed
  *    TTS layered on the existing request/response pipeline).
  */
@@ -76,7 +76,7 @@ export function MentorChat(props: {
    * Barge-in: fires the instant VAD detects the user talking, whether
    * the mentor is still generating text or already speaking it back.
    * Aborting the fetch here propagates to the server (request.signal
-   * in /api/chat) and on to the upstream Groq call, so generation
+   * in /api/chat) and on to the upstream AI provider call, so generation
    * actually stops rather than just being ignored client-side.
    */
   function handleBargeIn() {

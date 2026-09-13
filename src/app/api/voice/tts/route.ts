@@ -4,7 +4,7 @@ import { verifyAuthenticatedUser } from "@/lib/supabase/auth-guard";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getOrAssignMentor } from "@/lib/mentor/assignment";
 import { resolveVoiceId } from "@/lib/voice/provider";
-import { synthesizeSpeech } from "@/lib/groq/client";
+import { synthesizeSpeech } from "@/lib/ai/client";
 import { checkRateLimit, rateLimitResponse, VOICE_RATE_LIMIT } from "@/lib/api/rate-limit";
 import { reportApiError } from "@/lib/observability/error-reporting";
 
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   const rateLimit = checkRateLimit(`voice:${user.id}`, VOICE_RATE_LIMIT);
   if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
-  const ttsModel = process.env.GROQ_MODEL_TTS;
+  const ttsModel = process.env.GEMINI_MODEL_TTS;
   if (!ttsModel) {
     return NextResponse.json(
       { error: { code: "UPSTREAM_ERROR", message: "Text-to-speech model configuration is missing" } },

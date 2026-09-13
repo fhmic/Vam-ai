@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { MIC_CONSTRAINTS } from "@/lib/voice/vad";
 
 export type VoiceRecorderState = "idle" | "recording" | "processing";
 
@@ -18,7 +19,7 @@ export function useVoiceRecorder() {
   const start = useCallback(async () => {
     setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
       const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       chunksRef.current = [];
 

@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { completeJson } from "@/lib/groq/client";
+import { completeJson } from "@/lib/ai/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AssessmentTemplate, Json } from "@/types/database";
 
@@ -19,7 +19,7 @@ ONLY with JSON: {"scores": {"<question_id>": number 0-100, ...},
 /**
  * Stage 4.1 — Assessments.
  *
- * Submits a response and its Groq-derived score together, and writes a
+ * Submits a response and its AI-derived score together, and writes a
  * progress_snapshots row (source: 'assessment') per dimension score so
  * the Progress page's trend data includes assessment results alongside
  * activity metrics — this is exactly the extension point
@@ -57,7 +57,7 @@ export async function submitAssessment(params: {
 
   const parsed = scoreResultSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new Error(`submitAssessment: Groq returned an unparseable score: ${parsed.error.message}`);
+    throw new Error(`submitAssessment: AI provider returned an unparseable score: ${parsed.error.message}`);
   }
 
   const { error: scoreError } = await admin.from("assessment_scores").insert({

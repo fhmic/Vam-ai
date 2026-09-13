@@ -10,11 +10,23 @@ import type { Mentor, UserPreferences } from "@/types/database";
  * so the underlying TTS vendor/voice catalog can change without
  * touching /api/voice/tts's call site.
  *
- * IMPORTANT: the specific voice id strings below are placeholders
- * (e.g. "voice-warm-male-01") and must be replaced with real voice
- * identifiers from whichever TTS provider is actually configured before
- * this is used against a live API — this repo does not have network
- * access to any TTS provider to verify real voice ids against.
+ * Gemini migration anomaly fix: the voice id strings here were previously
+ * literal placeholders (e.g. "voice-warm-male-01") that don't
+ * correspond to any real provider voice — they'd have 502'd on the
+ * first real /api/voice/tts call regardless of which provider was
+ * configured. They're now real Gemini prebuilt voice names (Gemini's
+ * TTS models ship ~30 named voices — Kore, Puck, Charon, Aoede, Fenrir,
+ * Leda, Orus, Zephyr, and more — see
+ * https://ai.google.dev/gemini-api/docs/speech-generation#voices).
+ *
+ * IMPORTANT: Google does not publish a strict gender label per voice,
+ * only a name and a short character description (e.g. "Puck — Upbeat",
+ * "Kore — Firm"). The male/female pairing below is a reasonable
+ * starting guess from those descriptions, not a verified mapping —
+ * confirm by actually listening to each candidate voice (Google AI
+ * Studio's speech-generation playground is the fastest way) before
+ * treating this as final, and swap either name below if it doesn't
+ * match what "male"/"female" should sound like for this product.
  *
  * user_preferences.voice_gender always wins over the mentor's own
  * voice_id when set to 'male' or 'female' — this is the mechanism
@@ -24,19 +36,23 @@ import type { Mentor, UserPreferences } from "@/types/database";
  */
 
 const FALLBACK_VOICE_BY_GENDER: Record<"male" | "female", string> = {
-  male: "voice-warm-male-01",
-  female: "voice-warm-female-01",
+  male: "Puck",
+  female: "Kore",
 };
 
+/**
+ * Gemini voice names have no consistent naming convention to pattern-
+ * match against (unlike the old placeholder scheme's "-male-"/"-female-"
+ * suffix), so there's no reliable way to tell whether an arbitrary
+ * mentor.voice_id already matches a requested gender preference the
+ * way the old placeholder-based logic could. Until mentor voice ids are
+ * curated into an explicit { name, gender } table, a requested
+ * voice_gender preference always wins outright — simpler and correct,
+ * at the cost of not preferring a mentor's own configured voice when it
+ * happens to already match.
+ */
 export function resolveVoiceId(mentor: Mentor, voiceGender: UserPreferences["voice_gender"]): string {
   if (voiceGender === "male" || voiceGender === "female") {
-    // If the mentor's own configured voice already matches the
-    // requested gender, prefer it (keeps the mentor's specific voice
-    // rather than always falling back to the generic default for that
-    // gender). Voice id naming convention: "voice-<tone>-<gender>-<n>".
-    if (mentor.voice_id.includes(`-${voiceGender}-`)) {
-      return mentor.voice_id;
-    }
     return FALLBACK_VOICE_BY_GENDER[voiceGender];
   }
 

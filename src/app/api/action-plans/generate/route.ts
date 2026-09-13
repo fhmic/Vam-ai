@@ -9,10 +9,10 @@ export async function POST() {
   if (!auth.ok) return auth.response;
   const { user } = auth.data;
 
-  const utilityModel = process.env.GROQ_MODEL_UTILITY;
+  const utilityModel = process.env.GEMINI_MODEL_UTILITY;
   if (!utilityModel) {
     return NextResponse.json(
-      { error: { code: "UPSTREAM_ERROR", message: "Groq model configuration is missing" } },
+      { error: { code: "UPSTREAM_ERROR", message: "AI model configuration is missing" } },
       { status: 502 },
     );
   }

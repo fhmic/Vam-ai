@@ -195,7 +195,7 @@ VA may utilize third-party services, including but not limited to:
 
 - Supabase
 - Vercel
-- Groq
+- Google (Gemini API)
 - PostHog
 - Sentry
 

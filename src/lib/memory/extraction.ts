@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { completeJson } from "@/lib/groq/client";
+import { completeJson } from "@/lib/ai/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/types/database";
 
@@ -31,7 +31,7 @@ Return {"items": []} if nothing durable is worth remembering.`;
  * background job — the Phase 1 blueprint's Section 6.4 describes this
  * as a queued Postgres/pg_cron job for later; wiring real async job
  * infrastructure is out of scope here and would be premature before
- * Groq usage patterns are validated.
+ * Gemini usage patterns are validated.
  *
  * A failure here must never fail the chat response itself — the caller
  * is expected to catch and log, not surface this to the user (a memory

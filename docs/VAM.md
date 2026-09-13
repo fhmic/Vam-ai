@@ -139,16 +139,32 @@ the persona. The user can change persona manually from
 
 ### 4. Mentor
 
+**⚠ Doc/code mismatch, pre-existing (not part of the Gemini provider
+migration) — flagging rather than silently rewriting:** this section
+describes four mentors (`maya`/`jules`/`sam`/`priya`, seeded from
+`supabase/seed.sql`, anxiety/burnout/parenting-focused) that do not
+match what's actually seeded in code. The real mentor table is seeded
+by migration `0011_mentors.sql` with four different mentors
+(`the-coach`/Morgan, `the-guide`/Ava, `the-strategist`/Priya,
+`the-sparring-partner`/Jordan — executive-communication-coaching
+focused, not anxiety/parenting), and migration
+`0025_mentor_executive_coach_redefinition.sql` suggests a deliberate
+product pivot happened after this section was originally written.
+Whether to update this section to match the current mentor set, or
+whether the mentor set itself should change, is a product decision —
+not something to guess at while doing a provider swap. Left as-is
+below except for the one pure file-path correction.
+
 Four mentor candidates are seeded (`supabase/seed.sql`). They are
 deliberately personas, not just voices: each has a bio, a specialty
 area, a tone profile, and a model preference.
 
 | Mentor | Specialty | Default tone | Model preference |
 | --- | --- | --- | --- |
-| `maya` | Anxiety, avoidance, slow starts | Gentle, validating | `GROQ_MODEL_CHAT` |
-| `jules` | Career transitions, identity, ambition | Direct, warm | `GROQ_MODEL_CHAT` |
-| `sam` | Burnout, perfectionism, recovery | Firm, kind | `GROQ_MODEL_CHAT` |
-| `priya` | Parenting, context-switch, time | Practical, warm | `GROQ_MODEL_CHAT` |
+| `maya` | Anxiety, avoidance, slow starts | Gentle, validating | `GEMINI_MODEL_CHAT` |
+| `jules` | Career transitions, identity, ambition | Direct, warm | `GEMINI_MODEL_CHAT` |
+| `sam` | Burnout, perfectionism, recovery | Firm, kind | `GEMINI_MODEL_CHAT` |
+| `priya` | Parenting, context-switch, time | Practical, warm | `GEMINI_MODEL_CHAT` |
 
 Matching (`src/lib/mentor/matching.ts`) scores each candidate against
 the onboarding profile and persona, applies deterministic
@@ -162,7 +178,7 @@ mentor"** button in `mentor-chat.tsx` (built; clear messages +
 sessionId on change; returns `{changed, mentor}` so the UI no-ops
 when matching is deterministic and the same mentor is selected).
 
-The mentor prompt (`src/lib/groq/prompts.ts`) always carries:
+The mentor prompt (`src/lib/ai/prompts.ts`) always carries:
 
 - the active persona and mentor,
 - the last 8 turns of conversation,
@@ -256,19 +272,29 @@ three pieces:
 
 - **STT** (`/api/voice/stt`): the browser captures audio via
   MediaRecorder, posts a `Blob` to the route, the route calls
-  Groq Whisper (`GROQ_MODEL_STT`), and returns the transcript.
+  Gemini (`GEMINI_MODEL_STT`, via a native `generateContent` call
+  with the audio as an inline data part — Gemini has no dedicated
+  transcription endpoint), and returns the transcript.
 - **VAD** (`src/lib/voice/vad.ts`): a small browser utility that
   watches the input level and emits a `speech-end` event so the
   client knows when to flush and post the recording. This is
   intentionally not a full VAD (we use simple RMS thresholding
-  today) — a more sophisticated VAD is in the backlog.
+  today) — a more sophisticated VAD is in the backlog. The Gemini
+  provider migration also turned on the browser's own `echoCancellation` /
+  `noiseSuppression` / `autoGainControl` constraints on every
+  `getUserMedia` call (previously requested with no constraints at
+  all) — a real, free reduction in how often the mentor's own TTS
+  output falsely triggers barge-in, though not a substitute for a
+  proper VAD model.
 - **TTS** (`/api/voice/tts` + `src/lib/voice/tts-playback-queue.ts`):
   the mentor reply is chunked by sentence
   (`src/lib/voice/sentence-chunker.ts`), each chunk is sent to
-  Groq PlayAI (`GROQ_MODEL_TTS`) in order, and the resulting
-  audio is queued for sequential playback. The queue smooths
-  out TTS latency so the user hears continuous speech instead of
-  one long pause per chunk.
+  Gemini (`GEMINI_MODEL_TTS`) in order, and the resulting
+  audio — raw PCM wrapped in a WAV header server-side, since
+  Gemini's TTS has no container-format output option — is queued
+  for sequential playback. The queue smooths out TTS latency so
+  the user hears continuous speech instead of one long pause per
+  chunk.
 
 Three voice modes coexist on `/mentor`:
 
@@ -278,8 +304,9 @@ Three voice modes coexist on `/mentor`:
    auto-detects utterances, the user can interrupt the mentor
    mid-reply (barge-in). See §24 for the full honest
    architecture writeup — this is **not** literally continuous
-   bidirectional audio streaming (Groq's STT/TTS are REST
-   endpoints, not a realtime socket API); it's client-side VAD
+   bidirectional audio streaming (Gemini's STT/TTS are REST-shaped
+   calls, not a realtime socket API — see §25 for Gemini Live as
+   the genuine-duplex upgrade path); it's client-side VAD
    + barge-in + sentence-streamed TTS layered on the existing
    request/response pipeline.
 
@@ -358,7 +385,7 @@ Once §17 (production setup) is complete, end users can:
                           v
 +-------------------------------------------------------+
 |  src/lib (domain logic, pure functions)               |
-|  - mentor/  memory/  voice/  groq/  legal/            |
+|  - mentor/  memory/  voice/  ai/  legal/               |
 |  - assessments/  action-plans/  recommendations/      |
 |  - progress/  analytics/  theme/  avatar/             |
 +-------------------------------------------------------+
@@ -366,15 +393,18 @@ Once §17 (production setup) is complete, end users can:
                           v
 +-------------------------------------------------------+
 |  Supabase (Postgres + Auth + Storage + RLS)           |
-|  - 28 forward-only migrations                         |
+|  - 29 forward-only migrations                         |
 |  - Service role key isolated to server-only paths     |
 |  - All user data behind RLS policies                  |
 +-------------------------------------------------------+
                           |
                           v
 +-------------------------------------------------------+
-|  Groq API (chat, STT, TTS) via raw fetch              |
-|  - No SDK; thin client in src/lib/groq/client.ts      |
+|  Gemini API (chat, STT, TTS) via raw fetch            |
+|  - Chat/JSON via Gemini's OpenAI-compatible endpoint;  |
+|    STT/TTS via native generateContent. No SDK; thin   |
+|    client in src/lib/ai/client.ts. (Migrated from     |
+|    Groq — see §23.2.)                                 |
 +-------------------------------------------------------+
 ```
 
@@ -422,19 +452,21 @@ All env vars are documented in `.env.example`. The complete list:
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | yes | Supabase clients |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | yes | Supabase clients |
 | `SUPABASE_SERVICE_ROLE_KEY` | no | yes (non-dev) | Admin client only |
-| `GROQ_API_KEY` | no | yes | All Groq calls |
-| `GROQ_MODEL_CHAT` | no | yes | Chat completions |
-| `GROQ_MODEL_UTILITY` | no | yes | Memory extraction, next-action |
-| `GROQ_MODEL_STT` | no | yes | `/api/voice/stt` |
-| `GROQ_MODEL_TTS` | no | yes | `/api/voice/tts` |
+| `GEMINI_API_KEY` | no | yes | All Gemini calls |
+| `GEMINI_MODEL_CHAT` | no | yes | Chat completions |
+| `GEMINI_MODEL_UTILITY` | no | yes | Memory extraction, next-action |
+| `GEMINI_MODEL_STT` | no | yes | `/api/voice/stt` |
+| `GEMINI_MODEL_TTS` | no | yes | `/api/voice/tts` |
 | `INTERNAL_CRON_SECRET` | no | yes (non-dev) | `/api/internal/purge-deleted-accounts` and `/api/internal/memory-consolidate` |
 | `SUPABASE_PROJECT_REF` | no | no | `db:types:linked` |
 | `RUN_INTEGRATION` | no | no | Test runner flag to enable the live Supabase integration tests |
 
 Anything prefixed `NEXT_PUBLIC_` is exposed to the browser bundle;
-**do not put any secret there.** The Groq service is the only
-third-party data processor; the Supabase service role key is the
-only VAM-controlled secret that is never sent to the browser.
+**do not put any secret there.** The Gemini API is the primary
+third-party AI data processor (see also the Sentry/PostHog entries
+in §9 — this line predates those being added and should really list
+all three); the Supabase service role key is the only VAM-controlled
+secret that is never sent to the browser.
 
 
 ### 15. Security model
@@ -505,7 +537,7 @@ only VAM-controlled secret that is never sent to the browser.
 
 **15.7 Observability**
 
-- Today: `console.error` in the Groq client and route
+- Today: `console.error` in the AI provider client and route
   handlers; no centralized log sink.
 - `X-Request-Id` is propagated on every `/api/internal/*` route
   (and threaded through from incoming `X-Request-Id` ≤ 200
@@ -599,7 +631,7 @@ You need accounts / CLI tools for:
 - **GitHub** — repo lives there
 - **Vercel** — hosts the Next.js app
 - **Supabase** — Postgres + auth + storage
-- **Groq** — chat / STT / TTS model API
+- **Gemini** — chat / STT / TTS model API
 - **Supabase CLI** (`supabase`) — for migrations and type-gen
 - **Node.js 18.18+** — see `engines` in `package.json`
 
@@ -737,7 +769,7 @@ before pushing for real.
 3. **Add environment variables** before the first deploy — see the
    full list in §14, but the minimum to get a green build is the
    four `NEXT_PUBLIC_SUPABASE_*` + `SUPABASE_SERVICE_ROLE_KEY` +
-   the four `GROQ_*` + `INTERNAL_CRON_SECRET`. Set them in
+   the four `GEMINI_*` + `INTERNAL_CRON_SECRET`. Set them in
    Vercel's project settings, scoped per environment (Production
    vs Preview).
 4. **Deploy** — click Deploy. The first build will fail at the
@@ -999,8 +1031,8 @@ across 28 API routes + 16 page routes.
 | `supabase start` fails to bind a port | Another Supabase stack is running | `supabase stop --no-backup` |
 | `npm run db:types` errors "project not linked" | Expected when no project is linked | Run `npx supabase link --project-ref <ref>` first |
 | Sign-in succeeds but every page returns 401 | `NEXT_PUBLIC_SUPABASE_URL` env var doesn't match the project | Re-check Vercel env vars, redeploy |
-| Mentor chat returns 502 "Groq model configuration is missing" | `GROQ_MODEL_CHAT` / `GROQ_MODEL_UTILITY` env vars not set | Set them in Vercel, redeploy |
-| Voice TTS returns 502 | `GROQ_MODEL_TTS` env var not set, or Groq model name has been deprecated | Check https://console.groq.com/docs/models, update env var |
+| Mentor chat returns 502 "AI model configuration is missing" | `GEMINI_MODEL_CHAT` / `GEMINI_MODEL_UTILITY` env vars not set | Set them in Vercel, redeploy |
+| Voice TTS returns 502 | `GEMINI_MODEL_TTS` env var not set, or Gemini model id has been deprecated | Check https://ai.google.dev/gemini-api/docs/deprecations, update env var |
 | Cron returns 401 | `INTERNAL_CRON_SECRET` env var mismatch | Make sure Vercel has the same value the route expects |
 | `voice-sessions` upload fails with 403 | RLS policy missing | Confirm migration 0028 applied; check `select * from pg_policies where tablename = 'objects' and policyname like 'voice_sessions%'` |
 | Production build fails with "Module not found: Can't resolve 'zod'" | A new dep was added but `npm install` not run | `npm install` locally, then push the updated `package-lock.json` |
@@ -1020,7 +1052,7 @@ across 28 API routes + 16 page routes.
 | --- | --- | --- |
 | Identity, sessions, onboarding | Implemented | Supabase Auth, profile trigger, protected routes, professional identity fields. Needs live-environment QA. |
 | Privacy and legal acceptance | Implemented foundation | Versioned acceptance ledger and re-acceptance flow exist. Legal copy still has placeholders and requires legal approval (see §18.3). |
-| Mentor text chat | Implemented | Streaming Groq chat, mentor assignment, persistence and prompt assembly exist. Requires real-key/evaluation QA. |
+| Mentor text chat | Implemented | Streaming Gemini chat, mentor assignment, persistence and prompt assembly exist. Requires real-key/evaluation QA. |
 | Mentor memory | Implemented baseline | Typed durable memory, extraction, consolidation and relevance ranking exist. No embedding retrieval yet (see §23 — deliberate gap). |
 | Voice | Implemented push-to-talk + live barge-in | STT/TTS and playback support exist. No full-duplex guarantee (see §24). |
 | Goals, action plans, progress | Implemented baseline | Progress snapshots, action plans, streaks and personal insights exist. |
@@ -1198,44 +1230,63 @@ onboarding. This is a genuine scope expansion, done
 deliberately, not a misreading of the original architecture
 doc.
 
-**23.2 Not live-tested: Groq API**
+**23.2 Not live-tested: Gemini API (originally Groq — migrated in a later provider swap, not part of the numbered Stage roadmap in §25)**
 
-`api.groq.com` is not reachable from the development sandbox
-where this was built. Every Groq-calling function
-(`src/lib/groq/client.ts`: chat completion streaming, JSON-mode
-completion, transcription, speech synthesis) is implemented
-against Groq's documented REST API shape (OpenAI-compatible
-`/openai/v1/chat/completions`, `/audio/transcriptions`,
-`/audio/speech`) but has never actually been called. Before
-relying on this:
+Neither `api.groq.com` (originally) nor
+`generativelanguage.googleapis.com` (after the Gemini migration) is
+reachable from the development sandbox where this was built. Every
+AI-provider-calling function (`src/lib/ai/client.ts`: chat completion
+streaming via Gemini's OpenAI-compatible endpoint, JSON-mode
+completion, transcription via native `generateContent` with an inline
+audio part, speech synthesis via native `generateContent` with an
+audio response modality) is implemented against Gemini's documented
+API shape but has never actually been called. Before relying on this:
 
-1. Verify `GROQ_MODEL_CHAT`, `GROQ_MODEL_UTILITY`,
-   `GROQ_MODEL_STT`, `GROQ_MODEL_TTS` in `.env.local`/Vercel
-   are real, currently-available Groq-hosted model names —
-   Groq's model catalog changes over time and this repo does
-   not hardcode any model name, specifically so it can't
-   silently go stale in code.
-2. Verify Groq's `/audio/speech` endpoint and request shape
-   match what `synthesizeSpeech()` sends — implemented from a
-   general understanding of Groq's TTS offering, not a
-   verified live spec.
-3. Run one real end-to-end chat turn against a real Groq key
-   before trusting the SSE-parsing logic in `mentor-chat.tsx`
-   and `readGroqSseText()` in `/api/chat/route.ts` — both
-   assume the standard OpenAI-style
-   `data: {"choices":[{"delta":{"content":"..."}}]}` SSE chunk
-   shape.
-4. Stage 3/4 add three more Groq-calling functions with the
+1. Verify `GEMINI_MODEL_CHAT`, `GEMINI_MODEL_UTILITY`,
+   `GEMINI_MODEL_STT`, `GEMINI_MODEL_TTS` in `.env.local`/Vercel
+   are real, currently-available Gemini model ids — Google's model
+   catalog moves fast and deprecates on a published schedule (see
+   https://ai.google.dev/gemini-api/docs/models and
+   https://ai.google.dev/gemini-api/docs/deprecations); this repo
+   does not hardcode any model name, specifically so it can't
+   silently go stale in code. As of the Gemini migration, the
+   Gemini 2.5 family (including its TTS preview models) is
+   scheduled to shut down 16 Oct 2026 — `.env.example` defaults to
+   the Gemini 3.x line to avoid deploying against a model that's
+   about to disappear, but re-verify this if you're reading it
+   later than that date.
+2. Verify Gemini's native `generateContent` audio-output response
+   shape (`candidates[0].content.parts[0].inlineData.data`, base64
+   PCM) matches what `synthesizeSpeech()` expects, and that the
+   hand-written PCM→WAV header in `pcmToWav()` produces audio the
+   browser actually decodes — implemented from Gemini's documented
+   shape, not a verified live response. `tests/unit/wav-encoding.test.ts`
+   verifies the header's byte layout in isolation, which is not the
+   same as verifying real PCM bytes from a real API call decode
+   correctly end-to-end.
+3. Run one real end-to-end chat turn against a real `GEMINI_API_KEY`
+   before trusting the SSE-parsing logic in `mentor-chat.tsx` and
+   `readAiSseText()` in `/api/chat/persist-reply.ts` — both assume
+   Gemini's OpenAI-compatible endpoint emits the standard OpenAI-style
+   `data: {"choices":[{"delta":{"content":"..."}}]}` SSE chunk shape,
+   which Google documents but this repo has not independently
+   confirmed against a live response.
+4. Stage 3/4 add three more AI-provider-calling functions with the
    same caveat: `generateWeeklyActionPlan`,
-   `consolidateMemoriesIfNeeded`, and `submitAssessment` —
-   none have been called against a live Groq key either.
+   `consolidateMemoriesIfNeeded`, and `submitAssessment` — none have
+   been called against a live Gemini key either.
+5. Run one real `transcribeAudio()` call against a real voice
+   recording — the inline-audio-part request shape in
+   `src/lib/ai/client.ts` is new as of the Gemini migration and has not been
+   exercised against real audio bytes at all (Groq's separate
+   `/audio/transcriptions` endpoint, which this replaced, was itself
+   never live-tested either — see the equivalent caveat this section
+   carried before the migration).
 
-**23.3 Deliberate gap: no embedding-based memory retrieval**
+**23.3 No longer a hard blocker, but not yet implemented: embedding-based memory retrieval**
 
 `memory_items.embedding` (migration 0014) exists in the schema
-but is never populated or queried. Groq does not offer an
-embeddings endpoint; no other embedding provider has been
-selected. Retrieval (`src/lib/memory/retrieval.ts`) ranks
+but is never populated or queried. Retrieval (`src/lib/memory/retrieval.ts`) ranks
 purely by `importance x recency-decay`. This is fine for a
 small number of memory items per user but will degrade as
 memory grows — revisit once an embedding provider is chosen
@@ -1271,7 +1322,7 @@ consistently.
 
 **23.6 Mentor quality feedback and message ids**
 
-`/api/chat` streams a raw Groq SSE proxy and persists the
+`/api/chat` streams a raw AI-provider SSE proxy and persists the
 mentor's message asynchronously server-side — the client
 never gets the message id back directly. The feedback UI
 (`mentor-chat.tsx`) works around this with a best-effort poll
@@ -1328,10 +1379,11 @@ limitations, and what a real upgrade would require.
 
 **24.1 What "full real-time duplex" means here, concretely**
 
-Groq's STT (`/audio/transcriptions`) and TTS (`/audio/speech`)
+Gemini's STT and TTS (both native `generateContent` calls, not
+dedicated `/audio/*` endpoints — see §23.2)
 are **REST endpoints, not a WebSocket/realtime streaming
 API.** There is no way to open one persistent bidirectional
-audio socket to Groq and stream raw audio both directions
+audio socket to the provider and stream raw audio both directions
 continuously — that class of product (OpenAI's Realtime API,
 ElevenLabs Conversational AI, etc.) is a fundamentally
 different architecture requiring a different provider and,
@@ -1360,10 +1412,10 @@ instant:
    in-flight `/api/chat` fetch (`AbortController`) and stops
    TTS playback immediately (`TtsPlaybackQueue.stop()`). The
    abort signal is propagated all the way to the upstream
-   Groq fetch (`/api/chat/route.ts` passes `request.signal`
+   upstream chat fetch (`/api/chat/route.ts` passes `request.signal`
    through to `streamChatCompletion`), so an interruption
    actually cancels the generation server-side too — not
-   just something the client stops listening to while Groq
+   just something the client stops listening to while the provider
    keeps generating (and billing) in the background.
 
 3. **Sentence-level streaming TTS** — rather than waiting for
@@ -1380,7 +1432,7 @@ instant:
 
 None of this requires a WebSocket server, a different hosting
 model, or a different voice provider. It runs entirely within
-the existing Vercel serverless + Groq REST architecture.
+the existing Vercel serverless + Gemini REST-shaped-call architecture.
 
 **24.2 Known limitations, stated plainly**
 
@@ -1408,14 +1460,14 @@ the existing Vercel serverless + Groq REST architecture.
   (you couldn't interrupt at all in that case) — not
   implemented, since true barge-in was explicitly the point
   of this stage.
-- **Segment-based STT, not streaming STT.** Groq's Whisper
+- **Segment-based STT, not streaming STT.** Gemini's transcription
   endpoint takes a complete audio file, so transcription
   only starts after VAD decides your utterance is over
   (after the silence timeout) — there's no partial/live
   transcript while you're still talking.
-- **Not live-tested against a real Groq key** — same caveat
+- **Not live-tested against a real Gemini key** — same caveat
   as §23.2. The `/audio/speech` request shape in particular
-  has never been exercised against Groq's actual API.
+  has never been exercised against Gemini's actual API.
 
 **24.3 If you later want genuine low-latency continuous
 streaming**
@@ -1439,7 +1491,7 @@ this stage's work carries forward directly.
 | Stage | Title | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | Foundation (auth, DB, UI shell) | DONE | Migrations 0001–0025 applied; `(auth)` + `(app)` route groups build and pass middleware |
-| 2 | Mentor + chat (Groq, matching) | DONE | `src/lib/mentor/*`, `src/lib/groq/*`, `/api/chat` streams + persists; 7 mentor-matching + 13 prompt-assembly tests |
+| 2 | Mentor + chat (Groq, matching — provider later migrated to Gemini in an unnumbered follow-up change, not a formal Stage) | DONE | `src/lib/mentor/*`, `src/lib/ai/*`, `/api/chat` streams + persists; 7 mentor-matching + 13 prompt-assembly tests |
 | 3 | Onboarding + assessments + journeys | DONE | 5-step onboarding, 2 seeded journeys, scoring, action-plan generation |
 | 4 | Voice + 30-day program + soft delete | DONE | `/api/voice/{stt,tts}`, `src/lib/voice/*`, 30-day program content in migration 0027, soft-delete + restore + 30-day purge cron |
 | 5 | **Soft launch** | **NEXT** | See §25.1 |
@@ -1526,7 +1578,7 @@ demo without embarrassment.
 - Sentry for errors; structured JSON logging with
   `X-Request-Id` already implemented on `/api/internal/*`.
 - A runbook at `docs/RUNBOOK.md` covering: Supabase outage,
-  Groq outage, Vercel outage, leaked `INTERNAL_CRON_SECRET`,
+  Gemini outage, Vercel outage, leaked `INTERNAL_CRON_SECRET`,
   leaked `SUPABASE_SERVICE_ROLE_KEY`.
 
 5.10 **Staging-readiness checklist walk-through** (1 day)
@@ -1648,7 +1700,7 @@ Sign up → Onboarding assessment → Talk to mentor (text + voice)
   — see §3.
 - **30-day curriculum** as the primary retention loop — §5.
 - **Push-to-talk AND live barge-in voice** — see §8 and §24.
-- **Weekly action plans** generated by Groq — §6.
+- **Weekly action plans** generated by Gemini — §6.
 - **Collective Intelligence** foundation (consent, schema,
   admin back-office) — §9.
 - **Soft delete + 30-day restore window + nightly purge
@@ -1685,7 +1737,7 @@ fine-tuned/custom models (still deferred).
   memory and history within <2s — **met** (Supabase is sole
   source of truth, RLS-scoped reads)
 - Voice round-trip (speak → mentor speaks back) under ~3.5s
-  p50 on Groq — **partially met** (depends on the model
+  p50 on Gemini — **partially met** (depends on the model
   choice and live measurement; sentence-streamed TTS
   improves time-to-first-sound)
 - Assessment → Communication DNA → visibly different mentor
@@ -1753,7 +1805,7 @@ explicit "additive-only migrations" invariant tracked by
 **26.7 Original threat model highlights** (vs. current)
 
 The blueprint named six threat/mitigation pairs (forged
-user_id, prompt injection, leaked Groq key, Realtime channel
+user_id, prompt injection, leaked Gemini key, Realtime channel
 eavesdropping, malicious audio upload, account-deleted
 session re-use). The current codebase addresses all six and
 adds a seventh: the `verifyAuthenticatedUser` choke point

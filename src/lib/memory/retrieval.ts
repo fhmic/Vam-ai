@@ -11,10 +11,17 @@ const RECENCY_HALF_LIFE_DAYS = 30;
  * Ranks by importance x recency-decay. Semantic (embedding) similarity
  * to the current message is NOT part of the ranking yet — memory_items
  * has an `embedding` column (migration 0014) but no embedding provider
- * is wired up (Groq doesn't offer an embeddings endpoint; no other
- * provider has been chosen). This is a documented, deliberate gap — see
- * docs/STAGE-2-3-4-NOTES.md — not an oversight. When an embedding provider
- * is chosen, this function is the only place that needs to change.
+ * is wired up. This is a documented, deliberate gap — see
+ * docs/STAGE-2-3-4-NOTES.md — not an oversight.
+ *
+ * Gemini migration note: the reason this was deferred (Groq has no embeddings
+ * endpoint) no longer applies now that the provider is Gemini — Gemini
+ * does offer a text-embeddings model. This gap is now unblocked, not
+ * closed: wiring it up is a real scope of its own (choosing/pinning an
+ * embedding model, an embed-on-write path for new memory_items, a
+ * pgvector similarity query here) that hasn't been done as part of the
+ * provider swap. When it is, this function is still the only place
+ * that needs to change.
  *
  * Pure ranking math is separated into `rankMemories` so it's unit-
  * testable without a database (tests/unit/memory-ranking.test.ts);

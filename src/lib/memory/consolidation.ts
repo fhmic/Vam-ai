@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { completeJson } from "@/lib/groq/client";
+import { completeJson } from "@/lib/ai/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { MemoryItem } from "@/types/database";
 
@@ -26,7 +26,7 @@ items into a single well-written sentence each. Respond ONLY with JSON:
  *
  * Once a user has more than CONSOLIDATION_THRESHOLD active (non-
  * superseded) memory items, this synthesizes them into a smaller set of
- * `episodic_summary` items via Groq, then marks every consolidated item
+ * `episodic_summary` items via the AI provider, then marks every consolidated item
  * as superseded_by the new summary rows. This is the mechanism the
  * Phase 1 blueprint's Section 6.4 called "prune_low_importance_memory",
  * implemented as an on-demand consolidation rather than a separate

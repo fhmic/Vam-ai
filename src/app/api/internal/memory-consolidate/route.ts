@@ -8,7 +8,7 @@ import { reportApiError } from "@/lib/observability/error-reporting";
 /**
  * Hard cap on users processed per cron invocation. Sized so the run
  * stays well under Vercel Hobby's 10s function timeout even in the
- * pathological case (each consolidation is a Groq call + two DB
+ * pathological case (each consolidation is an AI provider call + two DB
  * writes; ~25 users finishes in <8s on the smallest tier in practice).
  * Remaining users get picked up on the next nightly run, which is
  * fine — consolidation is best-effort, not real-time.
@@ -34,10 +34,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const utilityModel = process.env.GROQ_MODEL_UTILITY;
+  const utilityModel = process.env.GEMINI_MODEL_UTILITY;
   if (!utilityModel) {
     return NextResponse.json(
-      { error: { code: "UPSTREAM_ERROR", message: "GROQ_MODEL_UTILITY is not configured" } },
+      { error: { code: "UPSTREAM_ERROR", message: "GEMINI_MODEL_UTILITY is not configured" } },
       { status: 502, headers: requestIdHeaders(requestId) },
     );
   }

@@ -34,6 +34,28 @@ export const DEFAULT_VAD_CONFIG: VadConfig = {
 };
 
 /**
+ * Gemini migration anomaly fix: both mic-capture call sites (push-to-talk in
+ * use-voice-recorder.ts, live/duplex mode in use-live-conversation.ts)
+ * were previously calling `getUserMedia({ audio: true })` with no
+ * constraints at all — leaving acoustic echo cancellation, noise
+ * suppression, and auto gain entirely up to whatever a given browser
+ * happens to default to (which varies, and is not something to rely on
+ * for a product whose live-conversation mode plays the mentor's own
+ * TTS audio out of the same device the mic is listening on). This is
+ * a real, free fix, not a full solution to the "no true full-duplex"
+ * limitation documented in docs/STAGE-6-VOICE-NOTES.md — it reduces
+ * how often the mentor's own voice triggers a false barge-in, it
+ * doesn't make barge-in detection perfect. A model-based VAD (see
+ * vad.ts's module docstring) remains the natural next upgrade if this
+ * proves insufficient in practice.
+ */
+export const MIC_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
+/**
  * Called once per audio frame with the frame's RMS energy and the time
  * elapsed since the last frame. Returns the next state and whether this
  * frame completes an utterance (speech was happening, then silence
