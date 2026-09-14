@@ -54,7 +54,7 @@ what was decided and why, and what is left to build.
 21. [Phase 1A final audit (collapsed)](#21-phase-1a-final-audit-collapsed)
 22. [Phase 1A foundation hardening](#22-phase-1a-foundation-hardening)
 23. [Stage 2/3/4 implementation notes](#23-stage-234-implementation-notes)
-24. [Stage 6 voice architecture notes](#24-stage-6-voice-architecture-notes)
+24. [Voice architecture notes](#24-voice-architecture-notes)
 25. [Roadmap (Stages 5–7)](#25-roadmap-stages-57)
 26. [Phase 1 historical design baseline (collapsed)](#26-phase-1-historical-design-baseline-collapsed)
 
@@ -139,32 +139,29 @@ the persona. The user can change persona manually from
 
 ### 4. Mentor
 
-**⚠ Doc/code mismatch, pre-existing (not part of the Gemini provider
-migration) — flagging rather than silently rewriting:** this section
-describes four mentors (`maya`/`jules`/`sam`/`priya`, seeded from
-`supabase/seed.sql`, anxiety/burnout/parenting-focused) that do not
-match what's actually seeded in code. The real mentor table is seeded
-by migration `0011_mentors.sql` with four different mentors
-(`the-coach`/Morgan, `the-guide`/Ava, `the-strategist`/Priya,
-`the-sparring-partner`/Jordan — executive-communication-coaching
-focused, not anxiety/parenting), and migration
-`0025_mentor_executive_coach_redefinition.sql` suggests a deliberate
-product pivot happened after this section was originally written.
-Whether to update this section to match the current mentor set, or
-whether the mentor set itself should change, is a product decision —
-not something to guess at while doing a provider swap. Left as-is
-below except for the one pure file-path correction.
+Four mentors are seeded by migration `0011_mentors.sql`, with their
+persona copy rewritten by migration
+`0025_mentor_executive_coach_redefinition.sql` (Product Redefinition —
+see that migration's own comment for the full rationale: the mentor
+must act as a proactive Executive Communication Coach, never a passive
+"what can I help you with today" assistant). This replaces an earlier
+version of this section that described a different, anxiety/burnout/
+parenting-focused mentor set (`maya`/`jules`/`sam`/`priya`) seeded from
+a `supabase/seed.sql` that doesn't exist in this codebase — that was a
+stale holdover from before the redefinition, not something still true;
+reconciled below to match what's actually live.
 
-Four mentor candidates are seeded (`supabase/seed.sql`). They are
-deliberately personas, not just voices: each has a bio, a specialty
-area, a tone profile, and a model preference.
+| Mentor | Slug | Specialty | Default tone | Model preference |
+| --- | --- | --- | --- | --- |
+| Morgan | `the-coach` | High-accountability, boardroom-ready delivery | Direct, high-energy | `GEMINI_MODEL_CHAT` |
+| Ava | `the-guide` | Foundational clarity, breath, pacing, structure | Calm, structured | `GEMINI_MODEL_CHAT` |
+| Priya | `the-strategist` | Structured thinking (Situation-Analysis-Recommendation) | Balanced, analytical | `GEMINI_MODEL_CHAT` |
+| Jordan | `the-sparring-partner` | Practice-first: mock interviews, scenario drilling | Challenging | `GEMINI_MODEL_CHAT` |
 
-| Mentor | Specialty | Default tone | Model preference |
-| --- | --- | --- | --- |
-| `maya` | Anxiety, avoidance, slow starts | Gentle, validating | `GEMINI_MODEL_CHAT` |
-| `jules` | Career transitions, identity, ambition | Direct, warm | `GEMINI_MODEL_CHAT` |
-| `sam` | Burnout, perfectionism, recovery | Firm, kind | `GEMINI_MODEL_CHAT` |
-| `priya` | Parenting, context-switch, time | Practical, warm | `GEMINI_MODEL_CHAT` |
+Each mentor's distinct `mentor_style` (challenging/supportive/
+balanced/practice-first) predates and survived the redefinition —
+only the underlying identity/behavior standard changed, not the
+style axis matching runs against (see the next paragraph).
 
 Matching (`src/lib/mentor/matching.ts`) scores each candidate against
 the onboarding profile and persona, applies deterministic
@@ -180,14 +177,30 @@ when matching is deterministic and the same mentor is selected).
 
 The mentor prompt (`src/lib/ai/prompts.ts`) always carries:
 
-- the active persona and mentor,
+- the active mentor's `persona_prompt` and the shared coaching
+  philosophy (`COACHING_PHILOSOPHY`),
 - the last 8 turns of conversation,
 - the top 12 retrieved memories (see §7),
 - the active goal + next action,
 - the user's timezone + program day,
-- a hard-coded set of guardrails (no clinical claims, no
-  diagnosis, no crisis-line advice, always offer a human
-  resource if the user mentions self-harm).
+- a hard-coded set of safety guardrails (`SAFETY_GUARDRAILS`: no
+  clinical claims, no diagnosis, redirect to human/crisis support if
+  the user mentions self-harm). This block was added during the
+  Gemini provider migration — it had been documented here as already
+  existing before that, but the prompt-assembly code carried no such
+  language at all until then; see `tests/unit/ai-prompt-assembly.test.ts`
+  for the regression test that now guards it.
+
+**Note, not part of this reconciliation:** §5 below (the 30-day
+program) still names two journeys (`anxiety-foundations`,
+`confidence-foundations`) that, like the old mentor set, don't appear
+anywhere in the actual migrations — `coaching_journeys` is seeded by
+migration 0022 under different slugs, and migration
+`0026_thirty_day_transformation_program.sql` describes a single
+*universal* 30-day program layered on top, not per-journey ones. This
+looks like the same kind of pre-redefinition staleness as the mentor
+table did, but reconciling it is outside what was asked for here —
+flagging it so it doesn't get missed.
 
 ### 5. The 30-day program
 
@@ -457,6 +470,9 @@ All env vars are documented in `.env.example`. The complete list:
 | `GEMINI_MODEL_UTILITY` | no | yes | Memory extraction, next-action |
 | `GEMINI_MODEL_STT` | no | yes | `/api/voice/stt` |
 | `GEMINI_MODEL_TTS` | no | yes | `/api/voice/tts` |
+| `LIVE_RELAY_SECRET` | no | yes (for Live voice) | `/api/voice/live-session`, `/api/voice/live-turn`'s auth is unaffected — this signs the token the *relay* verifies |
+| `NEXT_PUBLIC_LIVE_RELAY_URL` | yes | yes (for Live voice) | Browser's WebSocket target — see `src/hooks/use-gemini-live.ts` |
+| `GEMINI_MODEL_LIVE` | no | yes (for Live voice) | `/api/voice/live-session` |
 | `INTERNAL_CRON_SECRET` | no | yes (non-dev) | `/api/internal/purge-deleted-accounts` and `/api/internal/memory-consolidate` |
 | `SUPABASE_PROJECT_REF` | no | no | `db:types:linked` |
 | `RUN_INTEGRATION` | no | no | Test runner flag to enable the live Supabase integration tests |
@@ -1371,117 +1387,101 @@ added in that audit, which now also protects every Stage 2
 route for free.
 
 
-### 24. Stage 6 voice architecture notes
+### 24. Voice architecture notes
 
-The honest writeup of the live barge-in voice experience —
-what "real-time duplex" actually means here, the known
-limitations, and what a real upgrade would require.
+The honest writeup of live conversation voice — what changed, why,
+and what's still not verified.
 
-**24.1 What "full real-time duplex" means here, concretely**
+**24.1 Retired: the Stage 6 client-VAD approximation**
 
-Gemini's STT and TTS (both native `generateContent` calls, not
-dedicated `/audio/*` endpoints — see §23.2)
-are **REST endpoints, not a WebSocket/realtime streaming
-API.** There is no way to open one persistent bidirectional
-audio socket to the provider and stream raw audio both directions
-continuously — that class of product (OpenAI's Realtime API,
-ElevenLabs Conversational AI, etc.) is a fundamentally
-different architecture requiring a different provider and,
-usually, a dedicated always-on server rather than Vercel
-serverless functions.
+The original "Go live" implementation (Stage 6) was not real
+duplex audio streaming — Gemini's STT and TTS are REST-shaped
+`generateContent` calls (see §23.2), not a WebSocket/realtime API, so
+there was no way to open one persistent bidirectional audio socket to
+the provider directly. What existed instead: a continuous mic stream
+with client-side energy-threshold VAD (`src/lib/voice/vad.ts`)
+guessing when the user started/stopped talking, each detected
+utterance sent through the same segment-based STT -> chat -> TTS
+pipeline push-to-talk uses, with "barge-in" implemented as the client
+aborting the in-flight `/api/chat` fetch the instant VAD fired. This
+worked, but the barge-in was a client-side heuristic (false-triggered
+on the mentor's own TTS output bleeding into the mic — partially
+mitigated by requesting `echoCancellation` on `getUserMedia`, but
+never eliminated) and STT only ever saw complete utterances after a
+silence timeout, never a live partial transcript.
 
-What's built instead is a genuinely duplex-**feeling**
-experience layered on top of the existing request/response
-pipeline, entirely client-side for the parts that need to be
-instant:
+This mode has been **deleted**
+(`use-live-conversation.ts`/`use-voice-activity-detection.ts` are gone
+from `src/hooks/`) and replaced by §24.2 below. `vad.ts` itself
+survives only because `MIC_CONSTRAINTS` is still shared by every
+mic-capture call site — its VAD decision logic is currently unused by
+any hook, kept as a tested, correct piece of pure logic in case a
+future degraded-connectivity fallback ever needs client-side turn
+detection again.
 
-1. **Automatic turn-taking (no push-to-talk button)** —
-   `useVoiceActivityDetection` samples mic energy every
-   animation frame via the Web Audio API and runs it through
-   a simple RMS-threshold-with-hangover rule
-   (`src/lib/voice/vad.ts`). When it decides you've started
-   talking, it starts a `MediaRecorder` segment; when you go
-   quiet for `silenceTimeoutMs` (700ms default), it finalizes
-   the segment and sends it to `/api/voice/stt` — same
-   endpoint push-to-talk already used.
+**24.2 Current: the Gemini Live relay**
 
-2. **Barge-in (interruption)** — the VAD's "speech started"
-   signal fires regardless of what the mentor is doing. If
-   the mentor is still generating text or already speaking
-   it back, `handleBargeIn()` in `mentor-chat.tsx` aborts the
-   in-flight `/api/chat` fetch (`AbortController`) and stops
-   TTS playback immediately (`TtsPlaybackQueue.stop()`). The
-   abort signal is propagated all the way to the upstream
-   upstream chat fetch (`/api/chat/route.ts` passes `request.signal`
-   through to `streamChatCompletion`), so an interruption
-   actually cancels the generation server-side too — not
-   just something the client stops listening to while the provider
-   keeps generating (and billing) in the background.
+"Go live" now uses genuine full-duplex audio via Gemini's Live API —
+a persistent bidirectional WebSocket that handles listening, turn
+detection, and interruption on Gemini's own server side, not a client
+heuristic layered on top of request/response calls. This required a
+new piece of infrastructure `/api/chat` and `/api/voice/*` didn't:
 
-3. **Sentence-level streaming TTS** — rather than waiting for
-   the whole reply to finish generating before synthesizing
-   speech, `extractCompletedSentences`
-   (`src/lib/voice/sentence-chunker.ts`) watches the growing
-   SSE text and fires a TTS request for each completed
-   sentence as soon as it appears. `TtsPlaybackQueue` plays
-   these in order through one `<audio>` element. This is the
-   main lever for cutting time-to-first-sound — it's the
-   difference between "wait 4 seconds then hear the whole
-   answer" and "hear the first sentence in under a second
-   while the rest is still being written."
+- **`deploy/live-relay/`** — a small, separate, always-on Node
+  process (deployed to Fly.io — see that directory's `README.md` for
+  why Fly over Railway/a raw VPS for this specific workload) that
+  holds the actual outbound Gemini Live WebSocket open for the
+  duration of a conversation. This exists because Vercel serverless
+  functions (everything else in this app) cannot hold a persistent
+  connection open across a whole conversation — a function invocation
+  ends, it doesn't idle-wait for the next audio chunk.
+- **`/api/voice/live-session`** — mints a short-lived signed token
+  (`src/lib/voice/live-session-token.ts`) carrying the already-built
+  mentor system prompt and resolved voice name, so the relay never
+  needs its own Supabase client or a second copy of
+  `src/lib/ai/prompts.ts`'s assembly logic — it stays a small, mostly
+  stateless relay.
+- **`src/hooks/use-gemini-live.ts`** + `public/audio-worklets/
+  pcm-capture-worklet.js` — the browser side: an AudioWorklet
+  captures mic audio as 16-bit PCM at 16kHz (what Gemini Live expects)
+  and streams it over the WebSocket; a separate 24kHz playback
+  `AudioContext` schedules Gemini's spoken reply back-to-back for
+  gapless audio; an `{"type":"interrupted"}` control frame from the
+  relay (forwarded straight from Gemini's own `serverContent.interrupted`)
+  is what stops playback for real barge-in now, not an energy
+  threshold guess.
 
-None of this requires a WebSocket server, a different hosting
-model, or a different voice provider. It runs entirely within
-the existing Vercel serverless + Gemini REST-shaped-call architecture.
+Text transcripts for the on-screen chat history come from Gemini's
+own input/output transcription (enabled in the relay's `setup`
+message), forwarded as `userTranscript`/`mentorTranscript` control
+frames — the conversation is audio end-to-end, but the UI still shows
+it as a normal message list.
 
-**24.2 Known limitations, stated plainly**
+**24.3 What's still open**
 
-- **VAD is energy-threshold, not a trained model.** It will
-  false-trigger on loud background noise (a truck outside, a
-  dog barking) and may miss very quiet speech. A proper fix
-  is a WASM-based VAD model (e.g. a Silero VAD port) —
-  meaningfully more accurate, but a real dependency to add.
-  Left as a documented upgrade path, not built here.
-- **Sentence-boundary detection is regex-based**, not a real
-  NLP sentence splitter. It handles common cases (periods,
-  exclamation points, question marks followed by whitespace)
-  and has a minimum-length guard to avoid splitting on
-  things like "Dr." — but it isn't perfect, and never fully
-  can be with this approach.
-- **No echo cancellation between the mentor's TTS output and
-  the mic input.** If your speakers are audible to your own
-  microphone (no headphones, no browser-level acoustic echo
-  cancellation beyond what `getUserMedia`'s default
-  constraints provide), the VAD could pick up the mentor's
-  own voice as "user speech" and trigger a false barge-in.
-  Recommend testing with headphones first; a more robust fix
-  would explicitly mute VAD processing while TTS audio is
-  actively playing, accepting a small usability tradeoff
-  (you couldn't interrupt at all in that case) — not
-  implemented, since true barge-in was explicitly the point
-  of this stage.
-- **Segment-based STT, not streaming STT.** Gemini's transcription
-  endpoint takes a complete audio file, so transcription
-  only starts after VAD decides your utterance is over
-  (after the silence timeout) — there's no partial/live
-  transcript while you're still talking.
-- **Not live-tested against a real Gemini key** — same caveat
-  as §23.2. The `/audio/speech` request shape in particular
-  has never been exercised against Gemini's actual API.
-
-**24.3 If you later want genuine low-latency continuous
-streaming**
-
-That requires a different provider built for it (OpenAI
-Realtime API, ElevenLabs Conversational AI, Deepgram's
-streaming STT, etc.) and usually a persistent connection your
-serverless functions can't hold open — a small dedicated
-WebSocket relay (Fly.io, Railway, a tiny always-on box)
-sitting between the browser and that provider. That's a
-genuinely separate infrastructure decision, not an
-incremental change to what's here — flag it explicitly if
-you want to go that direction later rather than assuming
-this stage's work carries forward directly.
+- **Not live-tested.** Same caveat as everywhere else Gemini is
+  called in this codebase (§23.2) — this was built with no network
+  path to `generativelanguage.googleapis.com` or to Fly.io. Before
+  trusting it: deploy the relay, set real `GEMINI_API_KEY` /
+  `LIVE_RELAY_SECRET` on both sides, and run one real conversation,
+  watching the relay's logs for the actual shape of Gemini's
+  `setupComplete`/`serverContent` messages — `server.mjs`'s docstring
+  lists the specific things (voice config placement, transcription
+  config placement) that are implemented from documented shapes but
+  not confirmed against a live session.
+- **Turn persistence has a narrower edge case than /api/chat's.**
+  `/api/voice/live-turn` persists each completed turn (same
+  `persistMentorMessage` pipeline /api/chat uses), fired from the
+  browser on the relay's `turnComplete` signal — so reloading mid-
+  conversation only loses the *current, still-in-progress* turn, not
+  the whole conversation the way an earlier version of this gap
+  described. That in-progress-turn loss is inherent to firing
+  persistence on turn completion rather than incrementally, and isn't
+  fixed here.
+- **Voice-name-to-gender mapping** (`src/lib/voice/provider.ts`) is a
+  best guess from Gemini's short voice descriptions — same caveat
+  noted there, applies here too since Live mode uses the same
+  `resolveVoiceId`.
 
 
 ### 25. Roadmap (Stages 5–7)

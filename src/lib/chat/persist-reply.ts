@@ -7,10 +7,10 @@ const MEMORY_EXTRACTION_TRIGGER_EVERY_N_MESSAGES = 6;
 
 /**
  * Buffers the AI provider's SSE stream to reconstruct the full assistant reply,
- * persists it, then (every N messages) triggers memory extraction.
- * Runs after the response has already been returned to the client —
- * failures here are logged, never surfaced to the user, per
- * extractMemoriesFromMessages's documented contract.
+ * then delegates to persistMentorMessage for the actual insert + memory
+ * pipeline trigger. Runs after the response has already been returned
+ * to the client — failures here are logged, never surfaced to the
+ * user, per extractMemoriesFromMessages's documented contract.
  *
  * `recordActivity` defaults to true; /api/chat/greet passes false for
  * its proactive-opening message, since that message isn't user
@@ -29,44 +29,71 @@ export async function persistMentorReply(params: {
     const text = await readAiSseText(params.stream);
     if (!text) return;
 
-    await params.admin.from("messages").insert({
-      session_id: params.sessionId,
-      user_id: params.userId,
-      role: "mentor",
+    await persistMentorMessage({
+      admin: params.admin,
+      sessionId: params.sessionId,
+      userId: params.userId,
+      utilityModel: params.utilityModel,
       content: text,
+      recordActivity: params.recordActivity,
     });
-
-    if (params.recordActivity !== false) {
-      await recordActivitySnapshot(params.userId);
-    }
-
-    const { count } = await params.admin
-      .from("messages")
-      .select("id", { count: "exact", head: true })
-      .eq("session_id", params.sessionId);
-
-    if (count && count % MEMORY_EXTRACTION_TRIGGER_EVERY_N_MESSAGES === 0) {
-      const { data: recent } = await params.admin
-        .from("messages")
-        .select("role, content")
-        .eq("session_id", params.sessionId)
-        .order("created_at", { ascending: false })
-        .limit(MEMORY_EXTRACTION_TRIGGER_EVERY_N_MESSAGES);
-
-      await extractMemoriesFromMessages({
-        userId: params.userId,
-        utilityModel: params.utilityModel,
-        recentMessages: (recent ?? []).slice().reverse(),
-      });
-
-      await consolidateMemoriesIfNeeded({
-        userId: params.userId,
-        utilityModel: params.utilityModel,
-      });
-    }
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("persistMentorReply failed:", err);
+  }
+}
+
+/**
+ * The actual "save a mentor message and run the downstream pipeline"
+ * logic — inserting the message, recording the activity snapshot, and
+ * (every N messages) triggering memory extraction/consolidation.
+ * Factored out of persistMentorReply so /api/voice/live-turn (Gemini
+ * Live mode, which already has the complete mentor text from a
+ * transcript rather than an SSE stream to buffer) can trigger the same
+ * pipeline without duplicating it.
+ */
+export async function persistMentorMessage(params: {
+  admin: ReturnType<typeof createAdminClient>;
+  sessionId: string;
+  userId: string;
+  utilityModel: string;
+  content: string;
+  recordActivity?: boolean;
+}) {
+  await params.admin.from("messages").insert({
+    session_id: params.sessionId,
+    user_id: params.userId,
+    role: "mentor",
+    content: params.content,
+  });
+
+  if (params.recordActivity !== false) {
+    await recordActivitySnapshot(params.userId);
+  }
+
+  const { count } = await params.admin
+    .from("messages")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", params.sessionId);
+
+  if (count && count % MEMORY_EXTRACTION_TRIGGER_EVERY_N_MESSAGES === 0) {
+    const { data: recent } = await params.admin
+      .from("messages")
+      .select("role, content")
+      .eq("session_id", params.sessionId)
+      .order("created_at", { ascending: false })
+      .limit(MEMORY_EXTRACTION_TRIGGER_EVERY_N_MESSAGES);
+
+    await extractMemoriesFromMessages({
+      userId: params.userId,
+      utilityModel: params.utilityModel,
+      recentMessages: (recent ?? []).slice().reverse(),
+    });
+
+    await consolidateMemoriesIfNeeded({
+      userId: params.userId,
+      utilityModel: params.utilityModel,
+    });
   }
 }
 

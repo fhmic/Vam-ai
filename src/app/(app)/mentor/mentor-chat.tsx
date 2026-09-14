@@ -7,7 +7,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import { MessageFeedback } from "@/components/chat/message-feedback";
 import { VoiceGenderToggle } from "@/components/voice/voice-gender-toggle";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
-import { useLiveConversation } from "@/hooks/use-live-conversation";
+import { useGeminiLive } from "@/hooks/use-gemini-live";
 import { createClient } from "@/lib/supabase/client";
 import { getMentorAvatar } from "@/lib/avatar/registry";
 import { WaveformBars } from "@/components/waveform/waveform-bars";
@@ -22,17 +22,23 @@ interface ChatMessage {
 }
 
 /**
- * Stage 6 — Real-time duplex voice.
+ * Stage 6/Gemini migration — Real-time duplex voice.
  *
- * Two voice modes coexist:
- *  - Push-to-talk (existing, Stage 2): record on click, send on click.
- *  - Live conversation (new): continuous mic stream, VAD auto-detects
- *    utterances, and the user can interrupt the mentor mid-reply —
- *    see docs/STAGE-6-VOICE-NOTES.md for the honest architecture
- *    writeup (this is not literally continuous bidirectional audio
- *    streaming — Gemini's STT/TTS are REST-shaped calls, not a realtime
- *    socket API — it's client-side VAD + barge-in + sentence-streamed
- *    TTS layered on the existing request/response pipeline).
+ * Two voice modes coexist, and they are architecturally different
+ * from each other, not just styled differently:
+ *  - Push-to-talk (Stage 2): record on click -> /api/voice/stt ->
+ *    /api/chat (text) -> /api/voice/tts, sentence-by-sentence.
+ *  - Live conversation (Gemini Live relay, see
+ *    deploy/live-relay/server.mjs and src/hooks/use-gemini-live.ts):
+ *    a single continuous full-duplex audio session — no separate
+ *    STT/chat/TTS calls, Gemini's own server-side VAD and turn
+ *    detection handle listening and interruption, and this component
+ *    only receives already-transcribed text (for the on-screen
+ *    history) and already-played-back audio (handled inside the
+ *    hook). This replaced an earlier client-VAD-over-REST
+ *    approximation of live conversation this file used to implement
+ *    directly — see the Gemini migration patch notes for why that
+ *    approach was replaced rather than kept as a fallback.
  */
 export function MentorChat(props: {
   mentorSlug: string | null;
@@ -58,6 +64,19 @@ export function MentorChat(props: {
   const chunkerStateRef = useRef(initialChunkerState);
   const abortControllerRef = useRef<AbortController | null>(null);
   const recorder = useVoiceRecorder();
+  // Tracks whether the in-progress live-mode transcript bubbles (one
+  // user, one mentor) have already been started for the current turn,
+  // so successive transcript fragments append to the same bubble
+  // instead of each starting a new one, and accumulates the raw text
+  // so the full turn can be persisted via /api/voice/live-turn once
+  // it completes (the relay itself has no database access — see that
+  // route's docstring). Reset on turnComplete.
+  const liveTurnRef = useRef<{
+    userStarted: boolean;
+    mentorStarted: boolean;
+    userText: string;
+    mentorText: string;
+  }>({ userStarted: false, mentorStarted: false, userText: "", mentorText: "" });
 
   useEffect(() => {
     if (audioRef.current && !ttsQueueRef.current) {
@@ -65,24 +84,69 @@ export function MentorChat(props: {
     }
   }, []);
 
-  const liveConversation = useLiveConversation({
-    onSpeechStart: handleBargeIn,
-    onUtterance: (blob) => {
-      void transcribeAndSend(blob);
+  /**
+   * NOT LIVE-VERIFIED whether Gemini's input/output transcription
+   * arrives as incremental delta fragments (append) or repeated
+   * full-so-far text (replace) — treated as delta/append here to
+   * match how every other streaming text path in this app already
+   * works (/api/chat's SSE deltas). If a real session shows Gemini
+   * sending full-replace transcripts instead, these two callbacks are
+   * the only place that needs to change.
+   */
+  const geminiLive = useGeminiLive({
+    onUserTranscript: (text) => {
+      liveTurnRef.current.userText += text;
+      setMessages((prev) => {
+        if (!liveTurnRef.current.userStarted) {
+          liveTurnRef.current.userStarted = true;
+          return [...prev, { role: "user", content: text }];
+        }
+        const next = [...prev];
+        const last = next[next.length - 1];
+        next[next.length - 1] = { role: "user", content: (last?.content ?? "") + text };
+        return next;
+      });
+    },
+    onMentorTranscript: (text) => {
+      liveTurnRef.current.mentorText += text;
+      setMessages((prev) => {
+        if (!liveTurnRef.current.mentorStarted) {
+          liveTurnRef.current.mentorStarted = true;
+          return [...prev, { role: "mentor", content: text }];
+        }
+        const next = [...prev];
+        const last = next[next.length - 1];
+        next[next.length - 1] = { role: "mentor", content: (last?.content ?? "") + text };
+        return next;
+      });
+    },
+    onTurnComplete: () => {
+      const { userText, mentorText } = liveTurnRef.current;
+      liveTurnRef.current = { userStarted: false, mentorStarted: false, userText: "", mentorText: "" };
+
+      // Both sides need at least something to persist a turn — an
+      // empty fragment can happen if the relay sends a turnComplete
+      // with no preceding transcript content (e.g. a very short
+      // interruption). Fire-and-forget: this is a best-effort save,
+      // matching persistMentorReply's own "log, don't surface to the
+      // user" failure handling for the equivalent text-mode path.
+      if (userText.trim() && mentorText.trim()) {
+        fetch("/api/voice/live-turn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, userText, mentorText }),
+        })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data: { sessionId?: string } | null) => {
+            if (data?.sessionId && data.sessionId !== sessionId) setSessionId(data.sessionId);
+          })
+          .catch((err) => {
+            // eslint-disable-next-line no-console
+            console.error("live-turn persistence failed:", err);
+          });
+      }
     },
   });
-
-  /**
-   * Barge-in: fires the instant VAD detects the user talking, whether
-   * the mentor is still generating text or already speaking it back.
-   * Aborting the fetch here propagates to the server (request.signal
-   * in /api/chat) and on to the upstream AI provider call, so generation
-   * actually stops rather than just being ignored client-side.
-   */
-  function handleBargeIn() {
-    abortControllerRef.current?.abort();
-    ttsQueueRef.current?.stop();
-  }
 
   async function transcribeAndSend(blob: Blob) {
     const form = new FormData();
@@ -187,7 +251,6 @@ export function MentorChat(props: {
       // leave whatever partial reply was already shown, no error banner.
     } finally {
       setIsSending(false);
-      if (liveModeOn) liveConversation.resumeListening();
     }
   }
 
@@ -298,20 +361,20 @@ export function MentorChat(props: {
 
   function toggleLiveMode() {
     if (liveModeOn) {
-      liveConversation.stop();
+      geminiLive.stop();
       setLiveModeOn(false);
     } else {
       setVoiceError(null);
-      void liveConversation.start();
+      void geminiLive.start();
       setLiveModeOn(true);
     }
   }
 
   const liveStateLabel: Record<string, string> = {
     idle: "",
-    listening: "Listening…",
-    "user-speaking": "Hearing you…",
-    processing: "Thinking…",
+    connecting: "Connecting…",
+    live: "Listening…",
+    "mentor-speaking": "Speaking…",
   };
 
   return (
@@ -323,9 +386,9 @@ export function MentorChat(props: {
             <h1 className="font-display text-xl font-medium text-ink dark:text-white">{props.mentorName}</h1>
             {props.mentorTagline ? <p className="text-sm text-ink/60 dark:text-white/60">{props.mentorTagline}</p> : null}
             <div className="mt-1 flex items-center gap-2">
-              <WaveformBars active={isSending || liveConversation.state === "user-speaking"} className="h-3" />
+              <WaveformBars active={isSending || geminiLive.state === "mentor-speaking"} className="h-3" />
               {liveModeOn ? (
-                <span className="text-xs text-current-500">{liveStateLabel[liveConversation.state]}</span>
+                <span className="text-xs text-current-500">{liveStateLabel[geminiLive.state]}</span>
               ) : null}
             </div>
           </div>
@@ -360,7 +423,7 @@ export function MentorChat(props: {
       </div>
 
       {voiceError ? <p className="mb-2 text-xs text-red-600">{voiceError}</p> : null}
-      {liveConversation.error ? <p className="mb-2 text-xs text-red-600">{liveConversation.error}</p> : null}
+      {geminiLive.error ? <p className="mb-2 text-xs text-red-600">{geminiLive.error}</p> : null}
 
       <form
         onSubmit={(e) => {

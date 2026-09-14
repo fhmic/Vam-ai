@@ -1,18 +1,22 @@
 /**
- * Stage 6 — Real-time duplex voice.
+ * Pure energy-threshold VAD decision logic.
  *
- * Pure energy-threshold VAD decision logic. The actual audio energy
- * sampling happens in useVoiceActivityDetection (Web Audio API
- * AnalyserNode, browser-only) — this function is the decision rule it
- * calls on every animation frame, kept separate specifically so the
- * turn-taking logic is unit-testable without a browser or a real mic.
+ * As of the Gemini Live migration, this is no longer wired to any
+ * live hook — the hooks that used it (use-voice-activity-detection.ts,
+ * use-live-conversation.ts) were deleted because Gemini Live's own
+ * server-side VAD (see deploy/live-relay/server.mjs) replaced this
+ * client-side energy-threshold approach for the hands-free "Go live"
+ * mode. Kept here — not deleted — for two reasons: (1) `MIC_CONSTRAINTS`
+ * below is still used by every mic-capture call site, including the
+ * new Gemini Live hook, and (2) this pure decision function and its
+ * unit tests remain a useful, correct, general-purpose piece of logic
+ * if a future non-Live voice path ever needs client-side turn
+ * detection again (e.g. an offline/degraded-connectivity fallback).
  *
  * Deliberately simple (RMS-over-threshold with a hangover window) —
  * not a trained VAD model. Good enough to detect "is someone talking
- * right now" for turn-taking in a quiet-ish environment; will false-
- * trigger on loud background noise. A model-based VAD (e.g. via a
- * WASM port of Silero VAD) would be the natural upgrade if this proves
- * too noise-sensitive in practice.
+ * right now" in a quiet-ish environment; will false-trigger on loud
+ * background noise.
  */
 
 export interface VadState {
@@ -35,7 +39,7 @@ export const DEFAULT_VAD_CONFIG: VadConfig = {
 
 /**
  * Gemini migration anomaly fix: both mic-capture call sites (push-to-talk in
- * use-voice-recorder.ts, live/duplex mode in use-live-conversation.ts)
+ * use-voice-recorder.ts, live/duplex mode in use-gemini-live.ts)
  * were previously calling `getUserMedia({ audio: true })` with no
  * constraints at all — leaving acoustic echo cancellation, noise
  * suppression, and auto gain entirely up to whatever a given browser

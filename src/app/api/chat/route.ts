@@ -70,7 +70,27 @@ export async function POST(request: Request) {
     const mentor = await getOrAssignMentor(user.id);
 
     let activeSessionId = sessionId;
-    if (!activeSessionId) {
+    if (activeSessionId) {
+      // Session-ownership fix — this used to trust a client-supplied sessionId
+      // outright: any authenticated user could pass another user's
+      // session UUID and both read that session's history into their
+      // own chat context (via the query below) and write into it. A
+      // session id was effectively a bearer token. Verify ownership
+      // before touching anything else.
+      const { data: session } = await admin
+        .from("conversation_sessions")
+        .select("id")
+        .eq("id", activeSessionId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!session) {
+        return NextResponse.json(
+          { error: { code: "NOT_FOUND", message: "Session not found" } },
+          { status: 404 },
+        );
+      }
+    } else {
       const { data: session, error: sessionError } = await admin
         .from("conversation_sessions")
         .insert({ user_id: user.id, mentor_id: mentor.id })

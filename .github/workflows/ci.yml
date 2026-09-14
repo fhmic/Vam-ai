@@ -54,7 +54,7 @@ jobs:
 
       - name: Lint for leaked server-only secrets in client bundle
         # Change #5 / blueprint Section 14.1: fail the build if
-        # GROQ_API_KEY or SUPABASE_SERVICE_ROLE_KEY are referenced
+        # GEMINI_API_KEY, LIVE_RELAY_SECRET, or SUPABASE_SERVICE_ROLE_KEY are referenced
         # outside server-only files (route handlers, admin.ts, etc).
         # Grep-based guard: anything importing these outside files that
         # already import "server-only" (or live under src/app/api) is
@@ -63,7 +63,7 @@ jobs:
         # analyzer if the surface area grows.
         run: |
           MATCHES=$(grep -rl --include='*.ts' --include='*.tsx' \
-            -E 'GROQ_API_KEY|SUPABASE_SERVICE_ROLE_KEY' src \
+            -E 'GEMINI_API_KEY|LIVE_RELAY_SECRET|SUPABASE_SERVICE_ROLE_KEY' src \
             | xargs -r grep -L '"server-only"' \
             | grep -v '/api/' || true)
           if [ -n "$MATCHES" ]; then

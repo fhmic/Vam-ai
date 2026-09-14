@@ -59,7 +59,23 @@ export async function POST(request: Request) {
     const mentor = await getOrAssignMentor(user.id);
 
     let activeSessionId = sessionId;
-    if (!activeSessionId) {
+    if (activeSessionId) {
+      // Session-ownership fix — see /api/chat/route.ts's identical
+      // check for the full rationale; this route had the same gap.
+      const { data: session } = await admin
+        .from("conversation_sessions")
+        .select("id")
+        .eq("id", activeSessionId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!session) {
+        return NextResponse.json(
+          { error: { code: "NOT_FOUND", message: "Session not found" } },
+          { status: 404 },
+        );
+      }
+    } else {
       const { data: session, error: sessionError } = await admin
         .from("conversation_sessions")
         .insert({ user_id: user.id, mentor_id: mentor.id })

@@ -15,7 +15,7 @@ const bodySchema = z.object({
 /**
  * Stage 2.5 — Voice Layer (text-to-speech).
  *
- * POST { text: string } -> audio/mpeg
+ * POST { text: string } -> audio/wav
  *
  * Voice selection always re-reads the user's current voice_gender
  * preference and mentor assignment server-side — never trusts a
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       speed: preferences.tts_speed,
     });
 
-    return new Response(audio, { headers: { "Content-Type": "audio/mpeg" } });
+    return new Response(audio, { headers: { "Content-Type": "audio/wav" } });
   } catch (err) {
     reportApiError(err, { route: "voice/tts", userId: user.id });
     const message = err instanceof Error ? err.message : "Unknown error";
